@@ -189,7 +189,7 @@ def soundApi():
 
 
 #  main:
-#  data, sampling_rate= load_data()
+  data, sampling_rate= load_data()
 #  save_waveplot(data,sampling_rate)
 #  save_specshow(data,sampling_rate)
 #save_chroma_stft(data,sampling_rate)
