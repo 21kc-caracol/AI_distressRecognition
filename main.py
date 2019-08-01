@@ -12,7 +12,13 @@ import sklearn
 #sound api
 import freesound, sys,os
 
-import keras
+#import keras
+
+from tqdm import tqdm
+import glob, os
+
+from pathlib import Path
+
 
 
 
@@ -186,10 +192,78 @@ def soundApi():
           #result.retrieve(".",result.name+".wav")       
         """
 
+def splitMyWaves(path, durationInSec):
+    """pip install pydub"""
+
+    durationInSec= int(durationInSec)
+    os.chdir(path)
+    for fileName in tqdm(glob.glob("*.wav")):
+        #print(fileName)
+        src = path + fileName
+        #print(src)
+        edges = librosa.effects.split(audio, top_db=40, frame_length=128, hop_length=32)
+
+def flow():
+
+    #creating csv
+
+    #create header
+    header = 'filename waveplot zero_crossings spectral_centroid spectral_rolloff chroma_stft rms'  #TODO lev-future_improvement edit/add to get better results
+    fcc_amount= 40  # lev's initial value here was 40- this is the feature resolution- usually between 12-40
+    for i in range(1, fcc_amount+1):
+        header += f' mfcc_{i}'
+    header += ' label'
+    header = header.split() #  split by spaces as default
+    print(header)
+
+    #load features from each wav file- put inside the lines below as a function
+
+    #reaching each wav file
+    path_train= Path("train")
+    for path_label in path_train.iterdir():
+        #  print(path_label)  #  train\negative
+        label= path_label.name
+        print(label)
+        for path_class in path_label.iterdir():
+            true_class= path_class.name
+            print(true_class)
+            #  print(path_class)  #  train\negative\scream
+            wave_file_paths= path_class.glob('**/*.wav')  #  <class 'generator'>
+            #  print(type(wave_file_paths))
+            for wav_path in wave_file_paths:
+                #  print(type(wav_path))  #  <class 'pathlib.WindowsPath'>
+                #  print(wav_path)  #  train\positive\scream\110142__ryding__scary-scream-4.wav
+                #  print(wav_path.name)  #  110142__ryding__scary-scream-4.wav
+
+                break  #TODO lev: will be removed when i'll finish to write the function
 
 
+    #[x for x in p.iterdir() if x.is_dir()]
+    #print(labels)
+    #for label in labels:
+        #our_classes= os.listdir(os.join(""))
+        #for our_class in
+        #path= "train\\"+label
+
+
+#load *.wav positive *.wav negative into one instance with labels for each
+#extract features
+#normalize/scale
+#pass to keras
+
+
+
+if __name__ == "__main__":
 #  main:
-  data, sampling_rate= load_data()
+    flow()
+
+
+    #splitMyWaves("C:\\Users\\tunik\\PycharmProjects\\AI_distressRecognition\\train\\negative\\scream\\", 5)
+
+
+
+
+#data, sampling_rate= load_data()
 #  save_waveplot(data,sampling_rate)
 #  save_specshow(data,sampling_rate)
 #save_chroma_stft(data,sampling_rate)
