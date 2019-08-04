@@ -291,7 +291,13 @@ def extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration):
 def flow():
     #important variables
     data_file_path= 'data.csv'
-    min_wav_duration= 0.5  #  wont use shorter wav files
+    min_wav_duration= 0.3  #  wont use shorter wav files
+
+    #  prevent data file over run by accident
+    if os.path.exists(data_file_path):
+        text=  input(f'Press the space bar to override {data_file_path} and continue with the script')
+        if text != ' ':
+            sys.exit('User aborted script, data file saved :)')
 
     #create header for csv
     header = 'filename spectral_centroid zero_crossings spectral_rolloff chroma_stft rms'  #TODO lev-future_improvement edit/add to get better results
@@ -310,11 +316,11 @@ def flow():
 
     #reaching each wav file
     path_train= Path("train")
-    for path_label in path_train.iterdir():
+    for path_label in sorted(path_train.iterdir()):
         print("currently in : " + str(path_label))  #  train\negative
         positiveOrNegative= path_label.name #  negative
         #  print(label)
-        for path_class in tqdm(path_label.iterdir()):
+        for path_class in tqdm(sorted(path_label.iterdir())):
             #print info
             print("currently in class: " + str(path_class))
             #print amount of files in directory
@@ -337,10 +343,13 @@ def flow():
             wave_file_paths= path_class.glob('**/*.wav')  #  <class 'generator'>
             #  print(type(wave_file_paths))
             count=0  #  for progress tracking
-            for wav_path in wave_file_paths:
+            print('covered WAV files: ')
+            for wav_path in sorted(wave_file_paths):
                 count+=1
                 if (count % 50) == 0:
-                    print(f'covered {count} WAV files')
+                    fp = sys.stdout
+                    print(str(count), end = ' ')
+                    fp.flush()  #  makes print flush its buffer (doesnt print without it)
                 #  print(type(wav_path))  #  <class 'pathlib.WindowsPath'>
                 #  print(wav_path)  #  train\positive\scream\110142__ryding__scary-scream-4.wav
                 #  print(wav_path.name)  #  110142__ryding__scary-scream-4.wav
