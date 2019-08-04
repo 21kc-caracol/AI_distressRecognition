@@ -14,12 +14,14 @@ import freesound, sys,os
 
 #import keras
 from audioread import NoBackendError
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from tqdm import tqdm
 import glob, os
 
 from pathlib import Path
 import csv
+import warnings  #  record warnings from librosa
 
 
 
@@ -245,53 +247,62 @@ def extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration):
     #  print(feature_wav_envelope[0][:5])
     
     """
-    #  spectral_centroid
-    feature_wav_spec_cent = librosa.feature.spectral_centroid(y=wav_data, sr=sampling_rate)
-    #  print(feature_wav_spec_cent.shape)  #  (1, 216)
+    with warnings.catch_warnings(record=True) as feature_warnings:
+        #  spectral_centroid
+        feature_wav_spec_cent = librosa.feature.spectral_centroid(y=wav_data, sr=sampling_rate)
+        #  print(feature_wav_spec_cent.shape)  #  (1, 216)
 
-    #  zero crossings
-    zcr = librosa.feature.zero_crossing_rate(wav_data)
-    #  print("sum "+ str(np.sum(zcr)))
+        #  zero crossings
+        zcr = librosa.feature.zero_crossing_rate(wav_data)
+        #  print("sum "+ str(np.sum(zcr)))
 
-    #  spectral_rolloff
-    rolloff = librosa.feature.spectral_rolloff(y=wav_data, sr=sampling_rate)
-    #print(rolloff.shape)
-    #print(rolloff[0][0:3])
+        #  spectral_rolloff
+        rolloff = librosa.feature.spectral_rolloff(y=wav_data, sr=sampling_rate)
+        #print(rolloff.shape)
+        #print(rolloff[0][0:3])
 
-    #  chroma_stft
-    chroma_stft= librosa.feature.chroma_stft(y=wav_data, sr=sampling_rate)
-    #  print(chroma_stft.shape)
+        #  chroma_stft
+        chroma_stft= librosa.feature.chroma_stft(y=wav_data, sr=sampling_rate)
+        #  print(chroma_stft.shape)
 
-    #  rms and mfccs
-    n_mfcc = 40  #  resolution amount
-    mfccs = librosa.feature.mfcc(y=wav_data, sr=sampling_rate, n_mfcc=n_mfcc)
-    S, phase = librosa.magphase(mfccs)
-    rms = librosa.feature.rms(S=S)
-    #  print(rms.shape)
+        #  rms and mfccs
+        n_mfcc = 40  #  resolution amount
+        mfccs = librosa.feature.mfcc(y=wav_data, sr=sampling_rate, n_mfcc=n_mfcc)
+        S, phase = librosa.magphase(mfccs)
+        rms = librosa.feature.rms(S=S)
+        #  print(rms.shape)
 
-    #mfccs
-    #  print(mfccs.shape)
+        #mfccs
+        #  print(mfccs.shape)
+        #if there ara warnings- print and continue- for example Warning: Trying to estimate tuning from empty frequency set
+        # this is an OK warning- it just means that its really quiet..as in street ambient during the evenning..its a
+        # good negative example.
+        if len(feature_warnings) > 0:
+            for feature_warning in feature_warnings:
+                print("Warning: {} Triggered in:\n {}\nwith a duration of {} seconds.\n".format(
+                    feature_warning.message, wav_path, wav_duration))
 
-    #normalize what isnt normalized
-    to_append = f'{wav_name} {np.mean(feature_wav_spec_cent)} {np.mean(zcr)} {np.mean(rolloff)} {np.mean(chroma_stft)}' \
-                f' {np.mean(rms)}'
-    for e in mfccs:
-        to_append += f' {np.mean(e)}'
+        #got here - no warnings for this wav_path
+        #normalize what isnt normalized
+        to_append = f'{wav_name} {np.mean(feature_wav_spec_cent)} {np.mean(zcr)} {np.mean(rolloff)} {np.mean(chroma_stft)}' \
+                    f' {np.mean(rms)}'
+        for e in mfccs:
+            to_append += f' {np.mean(e)}'
 
-    to_append += f' {label}'
+        to_append += f' {label}'
 
-    #  save to csv (append new lines)
-    file = open(data_file_path, 'a', newline='')
-    with file:
-        writer = csv.writer(file)
-        writer.writerow(to_append.split())
+        #  save to csv (append new lines)
+        file = open(data_file_path, 'a', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(to_append.split())
 
-    #  print(to_append)
+        #  print(to_append)
 
-def flow():
+def create_csv():
     #important variables
     data_file_path= 'data.csv'
-    min_wav_duration= 0.3  #  wont use shorter wav files
+    min_wav_duration= 0.5  #  wont use shorter wav files
 
     #  prevent data file over run by accident
     if os.path.exists(data_file_path):
@@ -415,15 +426,91 @@ def bug_aaaah():
     #working file
     extract_feature_to_csv(Path(r'train\positive\scream\aaa.wav'), 'scream', data_file_path_bug, min_wav_duration)
 
+def csv_ready(csv_path):
+    #  process CSV
+    print("process CSV")
+    #use Pandas package for reading csv
+    data_csv=pd.read_csv(csv_path)
+    #  print(data_csv.head())
+    #  print(data_csv.shape)
+    # Dropping unnecessary columns
+    data_no_fileName = data_csv.drop(['filename'], axis=1)
+
+    #encode strings of labels to integers
+    labels_list = data_no_fileName.iloc[:, -1]
+    #  print(labels_list)
+    encoder = LabelEncoder()
+    encoded_labels_csv = encoder.fit_transform(labels_list)
+    #  print(encoded_labels_csv)  #  [0 0 0 ... 1 1 1]
+
+
+    # splitting data
+
+
+
+    # important to use scaling only after splitting the data into train/validation/test
+    scaler = StandardScaler()
+    X = scaler.fit_transform(np.array(data_no_fileName.iloc[:, :-1], dtype=float))  # takes all except labels column
+
+    #  print(type(X))  #  <class 'numpy.ndarray'>
+    #  np.savetxt('test.out', X, delimiter=',')  # X is an array
+    #  print(np.amax(X))  #10.041361690907811
+    #  print(np.amin(X))  #-9.474126604795927
+
+def prepare_for_stratford(csv_path, label):
+    #use Pandas package for reading csv
+    data_csv=pd.read_csv(csv_path)
+    # print(data_csv[data_csv.label == 'scream'])  #  [367 rows x 47 columns]
+    # print(len(data_csv[data_csv.label == 'scream']))  # 367
+
+    # find lower amount from types of labels
+    pos_amount= len(data_csv[data_csv.label == label])
+    neg_amount= len(data_csv[data_csv.label != label])
+    print("positives: "+str(pos_amount) +" negatives: "+str(neg_amount) )
+    lower_amount= min (pos_amount, neg_amount)
+    print("lower bound: "+str(lower_amount))
+
+    # split to negatives and positives - taking random rows
+    data_csv_positives= data_csv[data_csv.label == label]
+    data_csv_negatives= data_csv[data_csv.label != label]
+
+    # create pandas dataframe with lower_amount rows for each label
+    positives_lower_amount_samples= data_csv_positives.sample(n=lower_amount)
+    negatives_lower_amount_samples= data_csv_negatives.sample(n=lower_amount)
+    # print(len(positives_lower_amount_samples[positives_lower_amount_samples.label == label]))
+    # print(len(negatives_lower_amount_samples[negatives_lower_amount_samples.label != label]))
+    #print(negatives_lower_amount_samples.filename)  #verified it took random rows
+
+    # TODO lev- need to write code lines to take each time different negatives for same positive (suggestion: delete selected rows and then sample again...add if to verify theres enough neg samples each time)
+
+    # combined
+    combined_lower_amount=  positives_lower_amount_samples
+    # have to assign, returns appended datadrame
+    combined_lower_amount= combined_lower_amount.append(negatives_lower_amount_samples)
+    # print(len(combined_lower_amount))  # 734 ,when lower bound: 367
+
+    # saving pandas dataframe to pickle because i'll continue tomorrow
+    combined_lower_amount.to_pickle("pickle/combined_lower_amount.pkl")
+
+    # split for test and train+validation
+
+
+    #using K=5 in stratified cross validation because k=5 ==> 20% for testing which corresponds for
+
+
+
 if __name__ == "__main__":
 #  main:
-    flow()
+    #create_csv()
+    #csv_ready('data.csv')
+    prepare_for_stratford('data.csv', 'scream')
 
 
 
 
 
-    #splitMyWaves("C:\\Users\\tunik\\PycharmProjects\\AI_distressRecognition\\train\\negative\\scream\\", 5)
+
+
 
 
 
@@ -433,6 +520,7 @@ if __name__ == "__main__":
 #  save_specshow(data,sampling_rate)
 #save_chroma_stft(data,sampling_rate)
 #save_rms(data,sampling_rate)
+#splitMyWaves("C:\\Users\\tunik\\PycharmProjects\\AI_distressRecognition\\train\\negative\\scream\\", 5)
 #  play_showing_data(data, sampling_rate)
 # soundApi()
 #    try_catch()
