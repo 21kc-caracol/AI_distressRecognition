@@ -13,11 +13,13 @@ import sklearn
 import freesound, sys,os
 
 #import keras
+from audioread import NoBackendError
 
 from tqdm import tqdm
 import glob, os
 
 from pathlib import Path
+import csv
 
 
 
@@ -203,39 +205,153 @@ def splitMyWaves(path, durationInSec):
         #print(src)
         edges = librosa.effects.split(audio, top_db=40, frame_length=128, hop_length=32)
 
-def flow():
 
+def extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration):
     #creating csv
 
-    #create header
-    header = 'filename waveplot zero_crossings spectral_centroid spectral_rolloff chroma_stft rms'  #TODO lev-future_improvement edit/add to get better results
+    #extract features for a wav file
+    wav_name= wav_path.name  #  110142__ryding__scary-scream-4.wav
+    wav_name= wav_name.replace(" ","_")  #lev bug fix to allign csv columns
+    #  print(wav_name)
+
+    """
+    # lev upgrading error tracking- know which file caused the error
+    try:
+    """
+    wav_data, sampling_rate = librosa.load(wav_path, duration=5)
+
+    wav_duration= librosa.get_duration(y=wav_data, sr=sampling_rate)
+
+    #lev- dont use really short audio
+    if(wav_duration < min_wav_duration):
+        print("skipping " + wav_name +" ,duration= " + str(wav_duration))
+        return
+    """
+    except Exception as e:
+        print(wav_name)
+        print("quitting due to error")
+        exit()
+    """
+    """
+    #  envelope of a waveform
+    # deciding not to use for now- reson: keep model simple
+    
+    wav_stft = librosa.stft(wav_data)
+    feature_wav_envelope = librosa.amplitude_to_db(abs(wav_stft))
+
+    #  print(librosa.get_duration(wav_data,sampling_rate))
+    #  print(feature_wav_envelope.shape) #  (1025, 108)
+    #  print(feature_wav_envelope[0].shape)
+    #  print(feature_wav_envelope[0][:5])
+    
+    """
+    #  spectral_centroid
+    feature_wav_spec_cent = librosa.feature.spectral_centroid(y=wav_data, sr=sampling_rate)
+    #  print(feature_wav_spec_cent.shape)  #  (1, 216)
+
+    #  zero crossings
+    zcr = librosa.feature.zero_crossing_rate(wav_data)
+    #  print("sum "+ str(np.sum(zcr)))
+
+    #  spectral_rolloff
+    rolloff = librosa.feature.spectral_rolloff(y=wav_data, sr=sampling_rate)
+    #print(rolloff.shape)
+    #print(rolloff[0][0:3])
+
+    #  chroma_stft
+    chroma_stft= librosa.feature.chroma_stft(y=wav_data, sr=sampling_rate)
+    #  print(chroma_stft.shape)
+
+    #  rms and mfccs
+    n_mfcc = 40  #  resolution amount
+    mfccs = librosa.feature.mfcc(y=wav_data, sr=sampling_rate, n_mfcc=n_mfcc)
+    S, phase = librosa.magphase(mfccs)
+    rms = librosa.feature.rms(S=S)
+    #  print(rms.shape)
+
+    #mfccs
+    #  print(mfccs.shape)
+
+    #normalize what isnt normalized
+    to_append = f'{wav_name} {np.mean(feature_wav_spec_cent)} {np.mean(zcr)} {np.mean(rolloff)} {np.mean(chroma_stft)}' \
+                f' {np.mean(rms)}'
+    for e in mfccs:
+        to_append += f' {np.mean(e)}'
+
+    to_append += f' {label}'
+
+    #  save to csv (append new lines)
+    file = open(data_file_path, 'a', newline='')
+    with file:
+        writer = csv.writer(file)
+        writer.writerow(to_append.split())
+
+    #  print(to_append)
+
+def flow():
+    #important variables
+    data_file_path= 'data.csv'
+    min_wav_duration= 0.5  #  wont use shorter wav files
+
+    #create header for csv
+    header = 'filename spectral_centroid zero_crossings spectral_rolloff chroma_stft rms'  #TODO lev-future_improvement edit/add to get better results
     fcc_amount= 40  # lev's initial value here was 40- this is the feature resolution- usually between 12-40
     for i in range(1, fcc_amount+1):
         header += f' mfcc_{i}'
     header += ' label'
     header = header.split() #  split by spaces as default
-    print(header)
+
+    file = open(data_file_path, 'w', newline='')
+    with file:
+        writer = csv.writer(file)
+        writer.writerow(header)
 
     #load features from each wav file- put inside the lines below as a function
 
     #reaching each wav file
     path_train= Path("train")
     for path_label in path_train.iterdir():
-        #  print(path_label)  #  train\negative
-        label= path_label.name
-        print(label)
-        for path_class in path_label.iterdir():
-            true_class= path_class.name
-            print(true_class)
+        print("currently in : " + str(path_label))  #  train\negative
+        positiveOrNegative= path_label.name #  negative
+        #  print(label)
+        for path_class in tqdm(path_label.iterdir()):
+            #print info
+            print("currently in class: " + str(path_class))
+            #print amount of files in directory
+            onlyfiles = next(os.walk(path_class))[2]  # dir is your directory path as string
+            wav_amount: int= len(onlyfiles)
+            print("wav amount= " + str(wav_amount))
+            #  true_class= path_class.name
+            #  print(true_class)
             #  print(path_class)  #  train\negative\scream
+            #  print("name: "+ str(path_class.name))
+
+            #lev improvement according to coordination with mori
+            if (positiveOrNegative == "positive" ):
+                label = path_class.name  # scream
+            else:
+                print(f"switching label from {path_class.name} to <negative>")  #  added reporting
+                label = "negative"
+
+
             wave_file_paths= path_class.glob('**/*.wav')  #  <class 'generator'>
             #  print(type(wave_file_paths))
+            count=0  #  for progress tracking
             for wav_path in wave_file_paths:
+                count+=1
+                if (count % 50) == 0:
+                    print(f'covered {count} WAV files')
                 #  print(type(wav_path))  #  <class 'pathlib.WindowsPath'>
                 #  print(wav_path)  #  train\positive\scream\110142__ryding__scary-scream-4.wav
                 #  print(wav_path.name)  #  110142__ryding__scary-scream-4.wav
+                try:
+                    extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration)
+                except NoBackendError as e:
+                    print("audioread.NoBackendError "+"for wav path "+str(wav_path) )
+                    continue  #one file didnt work, continue to next one
 
-                break  #TODO lev: will be removed when i'll finish to write the function
+
+
 
 
     #[x for x in p.iterdir() if x.is_dir()]
@@ -251,11 +367,51 @@ def flow():
 #normalize/scale
 #pass to keras
 
+class fileNameExceptions(Exception):
+    def __init__(self, foo):
+        self.foo = foo
 
+def try_catch():
+    name= "lev"
+    try:
+        raise Exception("a")
+    except Exception as e:
+        print(name)
+
+    print("always")
+
+def bug_aaaah():
+    #important variables
+    data_file_path_bug= 'ah_bug.csv'
+    min_wav_duration= 0.5  #  wont use shorter wav files
+    bugfilePath=  Path(r'train\positive\scream\aaaah.wav')
+
+    #create header for csv
+    header = 'filename spectral_centroid zero_crossings spectral_rolloff chroma_stft rms'  #TODO lev-future_improvement edit/add to get better results
+    fcc_amount= 40  # lev's initial value here was 40- this is the feature resolution- usually between 12-40
+    for i in range(1, fcc_amount+1):
+        header += f' mfcc_{i}'
+    header += ' label'
+    header = header.split() #  split by spaces as default
+
+    file = open(data_file_path_bug, 'w', newline='')
+    with file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+    try:
+        #bug file
+        extract_feature_to_csv(bugfilePath, 'scream', data_file_path_bug, min_wav_duration)
+    except NoBackendError as e:
+        print(e)
+    #working file
+    extract_feature_to_csv(Path(r'train\positive\scream\aaa.wav'), 'scream', data_file_path_bug, min_wav_duration)
 
 if __name__ == "__main__":
 #  main:
     flow()
+
+
+
 
 
     #splitMyWaves("C:\\Users\\tunik\\PycharmProjects\\AI_distressRecognition\\train\\negative\\scream\\", 5)
@@ -270,5 +426,6 @@ if __name__ == "__main__":
 #save_rms(data,sampling_rate)
 #  play_showing_data(data, sampling_rate)
 # soundApi()
-
+#    try_catch()
+# bug_aaaah()
 
