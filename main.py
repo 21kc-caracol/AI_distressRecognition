@@ -12,7 +12,7 @@ import sklearn
 #sound api
 import freesound, sys,os
 
-#import keras
+
 from audioread import NoBackendError
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -25,6 +25,8 @@ import csv
 import warnings  #  record warnings from librosa
 from sklearn.model_selection import train_test_split
 import pickle as pkl
+from keras import models
+from keras import layers
 
 
 
@@ -679,12 +681,23 @@ def normalize_builtClassifier(k):
 
         # print(X_train_kfold.shape,X_test_kfold.shape,y_train_kfold.shape,y_test_kfold.shape)
         # (469, 45) (118, 45) (469,) (118,)
-    """
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)  # takes all except labels column
-    # print(np.amax(X_train))  # 8.054409985169642
-    # print(np.amin(X_train))  # -8.023973689252731
-    """
+
+        # scale data
+        scaler = StandardScaler()
+        scaler.fit(X_train_kfold)  # must call fit before calling transform.fitting on train, using on train+test+valid
+        X_train_kfold_scaled = scaler.transform(X_train_kfold)
+        # print(np.amax(X_train_kfold))  # 9490.310668945312
+        # print(np.amax(X_train_kfold_scaled))  # 8.236592246485245
+        X_test_kfold_scaled = scaler.transform(X_test_kfold)
+        X_test_scaled = scaler.transform(X_test_loaded)
+
+        # keras
+
+
+
+
+
+
 
 if __name__ == "__main__":
 #  main:
