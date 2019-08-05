@@ -23,6 +23,8 @@ import glob, os
 from pathlib import Path
 import csv
 import warnings  #  record warnings from librosa
+from sklearn.model_selection import train_test_split
+import pickle as pkl
 
 
 
@@ -461,6 +463,58 @@ def csv_ready(csv_path):
     #  print(np.amax(X))  #10.041361690907811
     #  print(np.amin(X))  #-9.474126604795927
 
+
+def how_to_stratified_k_fold(k, pkl_path):
+    # load combined dataset as pandas dataframe (50%-50% ratio between labels)
+    combined_lower_amount = pd.read_pickle(pkl_path)
+    # print(combined_lower_amount.shape)  #(734, 47)
+    # prepare dataframe for stratified
+    data_no_fileName = combined_lower_amount.drop(['filename'], axis=1)
+    # print(data_no_fileName.shape) # (734, 46)
+
+    # encode strings of labels to integers
+    labels_list = data_no_fileName.iloc[:, -1]
+    # print(labels_list.shape)  # (734,)
+    encoder = LabelEncoder()
+    encoded_labels_csv = np.array(encoder.fit_transform(labels_list))
+    # print(encoded_labels_csv)  #  [0 0 0 ... 1 1 1]
+    # print(encoded_labels_csv.shape) # (734,)
+
+    # print(list(encoder.inverse_transform([0,1])))  #  ['negative', 'scream']
+
+    # take all except labels column. important to add the dtype=float, otherwise im getting an error in the kfold.
+    only_features = np.array(data_no_fileName.iloc[:, :-1], dtype=float)
+    # print(only_features.shape)  # (734, 45)
+
+    # stratified split
+    skf = StratifiedKFold(n_splits=k, shuffle=True)
+    skf.get_n_splits(only_features, encoded_labels_csv)  # StratifiedKFold(n_splits=5, random_state=None, shuffle=True)
+    # print(skf)
+
+    for train_index, test_index in skf.split(only_features, encoded_labels_csv):
+        X_train, X_test = only_features[train_index], only_features[test_index]
+        y_train, y_test = encoded_labels_csv[train_index], encoded_labels_csv[test_index]
+
+        """
+        lev- verifying the expected behavior
+
+        # print("TRAIN:", train_index, "TEST:", test_index)
+        # print("train_index.shape "+ str(train_index.shape))  # train_index.shape (586,)
+        # print("test_index.shape " + str(test_index.shape)) # test_index.shape (148,)
+        # print("X_train.shape "+ str(X_train.shape))  # X_train.shape (586, 45)
+        # print("y_train.shape " + str(y_train.shape))  # y_train.shape (586,)
+        # print("X_test.shape "+ str(X_test.shape))  # X_test.shape (148, 45)
+        # print("y_test.shape " + str(y_test.shape))  # y_test.shape (148,)
+        # unique, counts = np.unique(y_train, return_counts=True)
+        # print(dict(zip(unique, counts)))  # {0: 293, 1: 293}
+        # unique, counts = np.unique(y_test, return_counts=True)
+        # print(dict(zip(unique, counts)))  # {0: 74, 1: 74}
+
+        """
+        normalize_builtClassifier(X_train, y_train, X_test, y_test)
+        break  # todo delete the break after checks are done
+
+
 def prepare_for_stratford(csv_path, label):
     #use Pandas package for reading csv
     data_csv=pd.read_csv(csv_path)
@@ -496,28 +550,21 @@ def prepare_for_stratford(csv_path, label):
     # saving pandas dataframe to pickle because i'll continue tomorrow- just for practise
     combined_lower_amount.to_pickle("pickle/combined_lower_amount.pkl")
 
-    # split for test and train+validation
-
-
     #using K=5 in stratified cross validation because k=5 ==> 20% for testing which corresponds for
 
-def normalize_builtClassifier(X_train, y_train, X_test, y_test):
+
+
+
+
+def splittingData(k, pkl_path):
     """"
-    important to use scaling only after splitting the data into train/validation/test
-    scale on training set only, then use the returend "fit" parameters to scale validation and test
+    arrange data for split, then split into test and k-fold
     """
 
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)  # takes all except labels column
-    # print(np.amax(X_train))  # 8.054409985169642
-    # print(np.amin(X_train))  # -8.023973689252731
-
-
-def stratified_k_fold(k,pkl_path):
     # load combined dataset as pandas dataframe (50%-50% ratio between labels)
-    combined_lower_amount = pd.read_pickle("pickle/combined_lower_amount.pkl")
-    # print(combined_lower_amount.shape)  #(734, 47)
-    # prepare dataframe for stratified
+    combined_lower_amount = pd.read_pickle(pkl_path)
+
+    # prepare dataframe for stratified and for split
     data_no_fileName = combined_lower_amount.drop(['filename'], axis=1)
     # print(data_no_fileName.shape) # (734, 46)
 
@@ -535,41 +582,118 @@ def stratified_k_fold(k,pkl_path):
     only_features = np.array(data_no_fileName.iloc[:, :-1], dtype=float)
     # print(only_features.shape)  # (734, 45)
 
+    """"
+    splitting stages
+    """
+    # split for test and k-fold
+    X_for_k_fold, X_test, y_for_k_fold, y_test = train_test_split(only_features, encoded_labels_csv, test_size=0.2)
+    # print(len(y_for_k_fold))  # 587
+    # print(len(y_test))  # 147
+
+    # save test data as pkl
+    path_x_test = Path("pickle/X_test.pkl")
+    with path_x_test.open('wb') as file:
+        pkl.dump(X_test, file)
+    path_y_test = Path("pickle/y_test.pkl")
+    with path_y_test.open('wb') as file:
+        pkl.dump(y_test, file)
+
     # stratified split
     skf = StratifiedKFold(n_splits=k, shuffle=True)
-    skf.get_n_splits(only_features, encoded_labels_csv)  # StratifiedKFold(n_splits=5, random_state=None, shuffle=True)
+    skf.get_n_splits(X_for_k_fold, y_for_k_fold)  # StratifiedKFold(n_splits=5, random_state=None, shuffle=True)
     # print(skf)
 
-    for train_index, test_index in skf.split(only_features, encoded_labels_csv):
-        X_train, X_test = only_features[train_index], only_features[test_index]
-        y_train, y_test = encoded_labels_csv[train_index], encoded_labels_csv[test_index]
-
+    fold_num = 1 #use for saving pkl files with different names
+    path= Path('pickle/folds')
+    for train_index, test_index in skf.split(X_for_k_fold, y_for_k_fold):
+        X_train_kfold, X_test_kfold = X_for_k_fold[train_index], X_for_k_fold[test_index]
+        y_train_kfold, y_test_kfold = y_for_k_fold[train_index], y_for_k_fold[test_index]
         """
-        lev- verifying the expected behavior
+        lev- verified the expected split ratio in function how_to_stratified_k_fold  
         
-        # print("TRAIN:", train_index, "TEST:", test_index)
-        # print("train_index.shape "+ str(train_index.shape))  # train_index.shape (586,)
-        # print("test_index.shape " + str(test_index.shape)) # test_index.shape (148,)
-        # print("X_train.shape "+ str(X_train.shape))  # X_train.shape (586, 45)
-        # print("y_train.shape " + str(y_train.shape))  # y_train.shape (586,)
-        # print("X_test.shape "+ str(X_test.shape))  # X_test.shape (148, 45)
-        # print("y_test.shape " + str(y_test.shape))  # y_test.shape (148,)
-        # unique, counts = np.unique(y_train, return_counts=True)
-        # print(dict(zip(unique, counts)))  # {0: 293, 1: 293}
-        # unique, counts = np.unique(y_test, return_counts=True)
-        # print(dict(zip(unique, counts)))  # {0: 74, 1: 74}
+        unique, counts = np.unique(y_train_kfold, return_counts=True)
+        print(dict(zip(unique, counts)))  # b4 split for stratford and test {0: 293, 1: 293} | after {0: 235, 1: 234}
+        unique, counts = np.unique(y_test_kfold, return_counts=True)
+        print(dict(zip(unique, counts)))  # b4 split for stratford and test {0: 74, 1: 74} | after {0: 59, 1: 59}
         
         """
-        normalize_builtClassifier(X_train, y_train, X_test, y_test )
-        break #todo delete the break after checks are done
+        #next lines are duplicates , dont want to copy to another function to save computation time
+        current_path_x_train= path / f"X_train_kfold_{fold_num}.pkl"
 
+        # print(current_path)  # pickle\folds\fold_x_train_1.pkl
+        with current_path_x_train.open('wb') as file:
+            pkl.dump(X_train_kfold, file)
+
+        current_path_x_test= path / f"X_test_kfold_{fold_num}.pkl"
+        with current_path_x_test.open('wb') as file:
+            pkl.dump(X_test_kfold, file)
+
+        current_path_y_train= path / f"y_train_kfold_{fold_num}.pkl"
+        with current_path_y_train.open('wb') as file:
+            pkl.dump(y_train_kfold, file)
+
+        current_path_y_test= path / f"y_test_kfold_{fold_num}.pkl"
+        with current_path_y_test.open('wb') as file:
+            pkl.dump(y_test_kfold, file)
+
+        fold_num+=1
+
+        # normalize_builtClassifier(X_train_kfold, y_train_kfold, X_test_kfold, y_test_kfold)
+
+def normalize_builtClassifier(k):
+    """"
+    important to use scaling only after splitting the data into train/validation/test
+    scale on training set only, then use the returend "fit" parameters to scale validation and test
+    """
+    #load from pickle test data
+    path_x_test = Path("pickle/X_test.pkl")
+    with path_x_test.open('rb') as file:
+        X_test_loaded = pkl.load(file)
+    path_y_test = Path("pickle/y_test.pkl")
+    with path_y_test.open('rb') as file:
+        y_test_loaded= pkl.load(file)
+
+    # print(X_test_loaded.shape)  # (147, 45)
+    # print(y_test_loaded.shape)  # (147,)
+
+
+    #built loop from 1-k including upper bound...first of all load pickle, then normalize, then send to keras...
+    path= Path('pickle/folds')
+    for fold in range(1,k+1):
+
+        current_path_x_train= path / f"X_train_kfold_{fold}.pkl"
+        with current_path_x_train.open('rb') as file:
+            X_train_kfold= pkl.load(file)
+
+        current_path_x_test= path / f"X_test_kfold_{fold}.pkl"
+        with current_path_x_test.open('rb') as file:
+            X_test_kfold= pkl.load(file)
+
+        current_path_y_train= path / f"y_train_kfold_{fold}.pkl"
+        with current_path_y_train.open('rb') as file:
+            y_train_kfold= pkl.load(file)
+
+        current_path_y_test= path / f"y_test_kfold_{fold}.pkl"
+        with current_path_y_test.open('rb') as file:
+            y_test_kfold= pkl.load(file)
+
+        # print(X_train_kfold.shape,X_test_kfold.shape,y_train_kfold.shape,y_test_kfold.shape)
+        # (469, 45) (118, 45) (469,) (118,)
+    """
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)  # takes all except labels column
+    # print(np.amax(X_train))  # 8.054409985169642
+    # print(np.amin(X_train))  # -8.023973689252731
+    """
 
 if __name__ == "__main__":
 #  main:
     #create_csv()
     #csv_ready('data.csv')
     #prepare_for_stratford('data.csv', 'scream')
-    stratified_k_fold(5,'pickle/combined_lower_amount.pkl')
+    #how_to_stratified_k_fold(5,'pickle/combined_lower_amount.pkl')
+    #splittingData(5,'pickle/combined_lower_amount.pkl')
+    normalize_builtClassifier(5)
 
 
 
