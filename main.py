@@ -14,6 +14,7 @@ import freesound, sys,os
 
 #import keras
 from audioread import NoBackendError
+from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from tqdm import tqdm
@@ -427,9 +428,12 @@ def bug_aaaah():
     extract_feature_to_csv(Path(r'train\positive\scream\aaa.wav'), 'scream', data_file_path_bug, min_wav_duration)
 
 def csv_ready(csv_path):
+    """"
+    took lines from here to different functions
+    """
     #  process CSV
     print("process CSV")
-    #use Pandas package for reading csv
+    #use Pandas package for reading csv- turns the csv into a dataframe
     data_csv=pd.read_csv(csv_path)
     #  print(data_csv.head())
     #  print(data_csv.shape)
@@ -453,7 +457,7 @@ def csv_ready(csv_path):
     X = scaler.fit_transform(np.array(data_no_fileName.iloc[:, :-1], dtype=float))  # takes all except labels column
 
     #  print(type(X))  #  <class 'numpy.ndarray'>
-    #  np.savetxt('test.out', X, delimiter=',')  # X is an array
+    #  np.savetxt('test.csv', X, delimiter=',')  # X is an array
     #  print(np.amax(X))  #10.041361690907811
     #  print(np.amin(X))  #-9.474126604795927
 
@@ -489,7 +493,7 @@ def prepare_for_stratford(csv_path, label):
     combined_lower_amount= combined_lower_amount.append(negatives_lower_amount_samples)
     # print(len(combined_lower_amount))  # 734 ,when lower bound: 367
 
-    # saving pandas dataframe to pickle because i'll continue tomorrow
+    # saving pandas dataframe to pickle because i'll continue tomorrow- just for practise
     combined_lower_amount.to_pickle("pickle/combined_lower_amount.pkl")
 
     # split for test and train+validation
@@ -497,13 +501,75 @@ def prepare_for_stratford(csv_path, label):
 
     #using K=5 in stratified cross validation because k=5 ==> 20% for testing which corresponds for
 
+def normalize_builtClassifier(X_train, y_train, X_test, y_test):
+    """"
+    important to use scaling only after splitting the data into train/validation/test
+    scale on training set only, then use the returend "fit" parameters to scale validation and test
+    """
+
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)  # takes all except labels column
+    # print(np.amax(X_train))  # 8.054409985169642
+    # print(np.amin(X_train))  # -8.023973689252731
+
+
+def stratified_k_fold(k,pkl_path):
+    # load combined dataset as pandas dataframe (50%-50% ratio between labels)
+    combined_lower_amount = pd.read_pickle("pickle/combined_lower_amount.pkl")
+    # print(combined_lower_amount.shape)  #(734, 47)
+    # prepare dataframe for stratified
+    data_no_fileName = combined_lower_amount.drop(['filename'], axis=1)
+    # print(data_no_fileName.shape) # (734, 46)
+
+    # encode strings of labels to integers
+    labels_list = data_no_fileName.iloc[:, -1]
+    # print(labels_list.shape)  # (734,)
+    encoder = LabelEncoder()
+    encoded_labels_csv = np.array(encoder.fit_transform(labels_list))
+    # print(encoded_labels_csv)  #  [0 0 0 ... 1 1 1]
+    # print(encoded_labels_csv.shape) # (734,)
+
+    # print(list(encoder.inverse_transform([0,1])))  #  ['negative', 'scream']
+
+    # take all except labels column. important to add the dtype=float, otherwise im getting an error in the kfold.
+    only_features = np.array(data_no_fileName.iloc[:, :-1], dtype=float)
+    # print(only_features.shape)  # (734, 45)
+
+    # stratified split
+    skf = StratifiedKFold(n_splits=k, shuffle=True)
+    skf.get_n_splits(only_features, encoded_labels_csv)  # StratifiedKFold(n_splits=5, random_state=None, shuffle=True)
+    # print(skf)
+
+    for train_index, test_index in skf.split(only_features, encoded_labels_csv):
+        X_train, X_test = only_features[train_index], only_features[test_index]
+        y_train, y_test = encoded_labels_csv[train_index], encoded_labels_csv[test_index]
+
+        """
+        lev- verifying the expected behavior
+        
+        # print("TRAIN:", train_index, "TEST:", test_index)
+        # print("train_index.shape "+ str(train_index.shape))  # train_index.shape (586,)
+        # print("test_index.shape " + str(test_index.shape)) # test_index.shape (148,)
+        # print("X_train.shape "+ str(X_train.shape))  # X_train.shape (586, 45)
+        # print("y_train.shape " + str(y_train.shape))  # y_train.shape (586,)
+        # print("X_test.shape "+ str(X_test.shape))  # X_test.shape (148, 45)
+        # print("y_test.shape " + str(y_test.shape))  # y_test.shape (148,)
+        # unique, counts = np.unique(y_train, return_counts=True)
+        # print(dict(zip(unique, counts)))  # {0: 293, 1: 293}
+        # unique, counts = np.unique(y_test, return_counts=True)
+        # print(dict(zip(unique, counts)))  # {0: 74, 1: 74}
+        
+        """
+        normalize_builtClassifier(X_train, y_train, X_test, y_test )
+        break #todo delete the break after checks are done
 
 
 if __name__ == "__main__":
 #  main:
     #create_csv()
     #csv_ready('data.csv')
-    prepare_for_stratford('data.csv', 'scream')
+    #prepare_for_stratford('data.csv', 'scream')
+    stratified_k_fold(5,'pickle/combined_lower_amount.pkl')
 
 
 
