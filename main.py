@@ -1,3 +1,4 @@
+import sys
 import librosa
 import librosa.display
 
@@ -346,12 +347,21 @@ def create_csv():
             #  print(path_class)  #  train\negative\scream
             #  print("name: "+ str(path_class.name))
 
-            # lev improvement according to coordination with mori
+            # lev improvement according to coordination with mori- irrelevant since 7.8.19
             if (positiveOrNegative == "positive"):
                 label = path_class.name  # scream
             else:
+                """
+                lev- updating to diffrintiate near misses and far misses.
+                keeping if-else structure for future options
+                
+                old:
                 print(f"switching label from {path_class.name} to <negative>")  # added reporting
                 label = "negative"
+                new:
+                
+                """
+                label = path_class.name  # NearMiss_scream
 
             wave_file_paths = path_class.glob('**/*.wav')  # <class 'generator'>
             #  print(type(wave_file_paths))
@@ -681,6 +691,8 @@ def normalize_builtClassifier(k):
         X_test_scaled = scaler.transform(X_test_loaded)
 
         # keras
+        #here mori will give me a pre-trained model
+
         model = models.Sequential()
 
         # print(X_train_kfold_scaled.shape[1])  #  45 (is the number of columns for each sample)
