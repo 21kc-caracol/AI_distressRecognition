@@ -12,14 +12,12 @@ import pandas as pd
 
 import sklearn
 
-import freesound
-
 from audioread import NoBackendError
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from tqdm import tqdm
-import glob, os
+import os
 
 from pathlib import Path
 import csv
@@ -27,18 +25,48 @@ import warnings  # record warnings from librosa
 from sklearn.model_selection import train_test_split
 import pickle as pkl
 
+import json
+from keras.models import model_from_json
+
+from models import get_optimised_model
+
+from statistics import mean,stdev
+from id3 import Id3Estimator
+from sklearn.linear_model import Perceptron
+from sklearn.feature_selection import *
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import *
+from sklearn.ensemble import *
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import GaussianNB
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.datasets import make_moons, make_circles, make_classification
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 
 #  global objects
 # todo add private/public inside class
 class global_For_Clf():
     def __init__(self):
-        self.n_mfcc = 40  # lev's initial value here was 40- this is the feature resolution- usually between 12-40
+        self.n_mfcc = 20  # lev's initial value here was 40- this is the feature resolution- usually between 12-40
         self.k_folds = 5  # amount of folds in k-fold
         # inside create_csv() more columns will be added to the csv head
         # TODO lev-future_improvement edit/add to get better results
         self.csv_initial_head = 'filename spectral_centroid zero_crossings spectral_rolloff chroma_stft rms mel_spec'
 
-        self.data_file_path = 'dataTestingScream.csv'
+        self.data_file_path = 'data_mfcc_20.csv'
         self.min_wav_duration = 0.5  # wont use shorter wav files
         self.clf_label = 'scream'
         self.nearMissRatio = 2  # 2 means <positives amount>/2
@@ -53,11 +81,13 @@ class global_For_Clf():
         self.sampling_data_repetitions = 5  # sampling randomly the data to create 1:1 ratio
         self.k_fold_repetitions: int = 5  # doing repeated k-fold for better evaluation
 
-        self.positives = -1
+        self.positives = -1  # -1 represents invalid value as initial value
         self.negatives = -1
         self.resultsPath = 'results/results.csv'
 
         self.try_lower_amount = np.inf
+
+        self.model = None  # here a model will be saved- the saved model shouldn't be trained
 
     def getInputDim(self):
         amount = len(self.csv_initial_head.split()) + self.n_mfcc - 1  # -1 because filename isnt a feature
@@ -89,7 +119,7 @@ def extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration, fc
     """
     # extract features for a wav file
     wav_name = wav_path.name  # 110142__ryding__scary-scream-4.wav
-    wav_name = wav_name.replace(" ", "_")  # lev bug fix to allign csv columns
+    wav_name = wav_name.replace(" ", "_")  # lev bug fix to align csv columns
     #  print(wav_name)
 
     """
@@ -170,12 +200,16 @@ def create_csv():
     data_file_path = screamGlobals.data_file_path
     min_wav_duration = screamGlobals.min_wav_duration
     #  print(data_file_path, min_wav_duration)
-
+    """
     #  prevent data file over run by accident
     if os.path.exists(data_file_path):
         text = input(f'Press the space bar to override {data_file_path} and continue with the script')
         if text != ' ':
             sys.exit('User aborted script, data file saved :)')
+    """
+    if os.path.exists(data_file_path):
+        return
+
 
     # create header for csv
     header = screamGlobals.csv_initial_head
@@ -248,7 +282,7 @@ def create_csv():
                     continue  # one file didnt work, continue to next one
 
 
-def create_lower_bound_data_panda(csv_path, label, screamGlobals):
+def create_lower_bound_data_panda(csv_path, label):
     """
     note(lev): because usually we will have more negatives than positives then this function
         chooses randomly the negatives samples so that it will have 1:1 ratio with the true label
@@ -283,6 +317,7 @@ def create_lower_bound_data_panda(csv_path, label, screamGlobals):
 
     # take random negatives that aren't near miss
     negatives_amount_left_to_take = lower_amount - NearMissAmountToTake
+    assert(negatives_amount_left_to_take>0)
     rest_of_negatives = data_csv.loc[
         ~data_csv['label'].isin([label, screamGlobals.nearMissLabel])]  # take all valid rows
 
@@ -330,7 +365,7 @@ def create_lower_bound_data_panda(csv_path, label, screamGlobals):
     return combined_lower_amount
 
 
-def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlobals):
+def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlobals, mod):
     """
     param: IntPositive- the integer representing our true classifiers label, for example: for scream classifier
         if scream class is represented by 1 ==> so  IntPositive = 1 . became necessary when wanted to return f1-score
@@ -358,11 +393,11 @@ def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlo
         # print(np.amax(X_train_kfold))  # 9490.310668945312
         # print(np.amax(X_train_kfold_scaled))  # 8.236592246485245
         X_test_kfold_scaled = scaler.transform(X_test_kfold)
-        #  X_test_scaled = scaler.transform(X_test)  #TODO think how to scale and where on the 20% initial test group
+        #  X_test_scaled = scaler.transform(X_test)  #  this is done in an other place. keeping for legacy
 
         # keras
         # here mori will give me a pre-trained model
-
+        # """
         model = models.Sequential()
 
         # print(X_train_kfold_scaled.shape[1])  #  45 (is the number of columns for each sample)
@@ -378,15 +413,16 @@ def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlo
                       , loss='binary_crossentropy'
                       , metrics=['accuracy'])
 
+        screamGlobals.model = mod
         # train model on training set of Kfold
         # verbose = 0 disables progress output
-        history = model.fit(X_train_kfold_scaled,
-                            y_train_kfold,
-                            epochs=20,
-                            batch_size=128,
-                            verbose=0)
+        # """
+        # model = screamGlobals.model
+
+        history = model.fit(X_train_kfold_scaled,y_train_kfold,epochs=20,batch_size=128,verbose=0)
 
         y_fold_predicted = model.predict_classes(X_test_kfold_scaled)
+        # print("finished_predictions")
         #  calculate scores
 
         #  calculate global precision score
@@ -407,7 +443,7 @@ def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlo
     return mean_scores_accuracy_k_fold, mean_scores_f1_k_fold, mean_scores_recall_fold
 
 
-def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions, screamGlobals):
+def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions):
     # prepare dataFrame for stratified and for split
     data_no_fileName = combined_lower_amount.drop(['filename'], axis=1)
     #  print(data_no_fileName.shape)  # ( , ) with label column
@@ -459,15 +495,36 @@ def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions, screamGlo
 
     #  now, y_test is binary, 0 represents the true label of the classifier
 
+    """
+    # find models best hyper-parameters
+    optimised_model= get_optimised_model(X_for_k_fold, X_test, y_for_k_fold, y_test)
+    screamGlobals.model= optimised_model
+    print(f"finished optimizing our model")
+    """
+
     # important values for deciding which is the best classifier
     scores_accuracy_k_fold_repeated = []
     scores_f1_k_fold_repeated = []
     scores_k_fold_recall = []
-
-    for repeat_number in tqdm(range(1, repetitions)):
-        score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_stratified_results(k, X_for_k_fold,
-                                                                                  y_for_k_fold, IntPositive,
-                                                                                  screamGlobals)
+    id3 = Id3Estimator()
+    # id3.fit(X_train_kfold_scaled, y_train_kfold)
+    # decisionTrees = DecisionTreeClassifier()
+    # decisionTrees.fit(X_train_kfold_scaled, y_train_kfold)
+    knn = KNeighborsClassifier(3)
+    # id3.fit(X_train_kfold_scaled, y_train_kfold)
+    svc1=SVC(kernel="linear", C=0.025)
+    svc2=SVC(gamma=2, C=1)
+    gauss=GaussianProcessClassifier(1.0 * RBF(1.0))
+    decisionTrees=DecisionTreeClassifier(max_depth=25)
+    rand=RandomForestClassifier(max_depth=25, n_estimators=10, max_features=1)
+    mlp=MLPClassifier(alpha=1, max_iter=1000)
+    adaboost=AdaBoostClassifier()
+    gaussNB=GaussianNB()
+    for mod in [knn,svc1,svc2,gauss,decisionTrees,rand,mlp,adaboost,gaussNB]:
+        for repeat_number in tqdm(range(1, repetitions)):
+            score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_stratified_results(k, X_for_k_fold,
+                                                                                      y_for_k_fold, IntPositive,
+                                                                                      screamGlobals,mod)
 
         scores_accuracy_k_fold_repeated.append(score_mean_k_fold)
         scores_f1_k_fold_repeated.append(f1_mean_k_fold)
@@ -479,9 +536,26 @@ def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions, screamGlo
 
     return mean_accuracy_k_fold_repeated, mean_f1_k_fold_repeated, mean_scores_k_fold_recall
 
+def get_model_head():
+    if screamGlobals.model is None:
+        raise Exception("No model, supply a model please.")
+    # config = screamGlobals.model.get_config()
+    # model_name= config['name']
+    model_name='ID3'
+    #  additional info will be in a single cell in the CSV so we seperate info by a double-underline:  __
+    additional_info = f''
+    if model_name.startswith("sequential"):
+        additional_info = f'model_layers={len(screamGlobals.model.layers)}'
+    #  add here else statement in case we deal with other models
 
-def results_to_csv(csv_results_head, csv_results, screamGlobals):
+    csv_model_head = f'model_name model_info'
+    csv_model_results = f'{model_name} {additional_info}'
+
+    return csv_model_head, csv_model_results
+
+def results_to_csv(csv_results_head, csv_results):
     # printing results to csv for tracking
+    print("results_to_csv")
     csv_data_results = f'{screamGlobals.clf_label} {screamGlobals.get_total_samples()}' \
                        f' {screamGlobals.positives} {screamGlobals.negatives}' \
                        f' {screamGlobals.getInputDim()} {screamGlobals.Kfold_testSize} {screamGlobals.k_folds}' \
@@ -489,7 +563,10 @@ def results_to_csv(csv_results_head, csv_results, screamGlobals):
 
     csv_features_results = f'{screamGlobals.n_mfcc}'
 
-    csv_final_results = csv_results + ' ' + csv_data_results + ' ' + csv_features_results  # add here csv_model_head
+    # TODO- get_model_head() can be optimized in future versions to separate head from results
+    csv_model_head, csv_model_results = get_model_head()
+
+    csv_final_results = csv_results + ' ' + csv_data_results + ' ' + csv_features_results+ ' ' + csv_model_results
     # TODO enter also model params according to moris suggestion- name, hyper params
 
     if not os.path.exists(screamGlobals.resultsPath):
@@ -499,7 +576,7 @@ def results_to_csv(csv_results_head, csv_results, screamGlobals):
 
         csv_features_head = f'n_mfcc_amount'
 
-        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' + csv_features_head  # add here csv_model_head
+        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' + csv_features_head+ ' ' + csv_model_head
 
         # save to csv (append new lines)
 
@@ -516,24 +593,24 @@ def results_to_csv(csv_results_head, csv_results, screamGlobals):
             writer.writerow(csv_final_results.split())
 
 
-def experiment_data_size(screamGlobals):
+def experiment_data_size():
     print("executing screamClf flow")
     # change global definitions at the top of the file inside global_For_Clf class #todo lev maybe create config file
     # screamGlobals = global_For_Clf()
-    # create_csv()  #  need to create only once, but for now its already created
+    create_csv()  #  need to create only once, but for now its already created
 
     # lev testing parameter
-    # screamGlobals.try_lower_amount= lower_bound_per_class
+    # screamGlobals.try_lower_amount= lower_bound_per_class  #  this is used in an outer function in a different file
 
     accuracy_sampling = []  # each iteration will append avg accuracy value
     f1_sampling = []
     recall_sampling = []
     for sample_number in tqdm(range(1, screamGlobals.sampling_data_repetitions)):
         lower_bound_data_panda = create_lower_bound_data_panda(screamGlobals.data_file_path,
-                                                               screamGlobals.clf_label, screamGlobals)
+                                                               screamGlobals.clf_label)
 
         score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_Repeated_strtfy_results \
-            (lower_bound_data_panda, screamGlobals.k_folds, screamGlobals.k_fold_repetitions, screamGlobals)
+            (lower_bound_data_panda, screamGlobals.k_folds, screamGlobals.k_fold_repetitions)
 
         accuracy_sampling.append(score_mean_k_fold)
         f1_sampling.append(f1_mean_k_fold)
@@ -548,10 +625,26 @@ def experiment_data_size(screamGlobals):
 
     csv_results = f'{mean_accuracy_sampling} {mean_f1_sampling} {mean_recall_sampling}'
 
-    results_to_csv(csv_results_head, csv_results, screamGlobals)
+    results_to_csv(csv_results_head, csv_results)
+
+def different_model():
+    # lower size must be > Nearmiss
+    for size in tqdm([100,150,200,250,300,350,400]):
+        screamGlobals.try_lower_amount = size
+        experiment_data_size()
+
+def experiments():
+    different_model()
 
 
 if __name__ == "__main__":
+    screamGlobals = global_For_Clf()  #  create global variable
+    experiments()
+
+
+    """
+    # TODO lev:covering for now to prevent shadowing of screamGlobals...later i'll see if i need this main at all
+    
     print("executing screamClf flow")
     # change global definitions at the top of the file inside global_For_Clf class #todo lev maybe create config file
     # screamGlobals = global_For_Clf()
@@ -581,3 +674,6 @@ if __name__ == "__main__":
     csv_results = f'{mean_accuracy_sampling} {mean_f1_sampling} {mean_recall_sampling}'
 
     results_to_csv(csv_results_head, csv_results)
+    
+    
+    """
