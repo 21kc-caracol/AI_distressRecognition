@@ -1,62 +1,20 @@
-from __future__ import print_function
-
-import librosa
-import librosa.display
-
-import matplotlib.pyplot as plt
-
 from keras import models
 from keras import layers
-import numpy as np
-import pandas as pd
-
-import sklearn
-
-# import freesound
-
-from audioread import NoBackendError
-from sklearn.model_selection import StratifiedKFold
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-
-from tqdm import tqdm
-import glob, os
 
 
 from pathlib import Path
-import csv
-import warnings  # record warnings from librosa
-from sklearn.model_selection import train_test_split
+
 import pickle as pkl
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
+
 
 from keras.wrappers.scikit_learn import KerasRegressor
 from sklearn.model_selection import GridSearchCV
-from keras.models import Sequential
-from keras.layers import Dense, Activation
-from keras.activations import relu, sigmoid
-from IPython.display import SVG
-from keras.utils.vis_utils import model_to_dot
+
 from sklearn.preprocessing import StandardScaler
-class global_For_Class:
-    input_shape= None
 
 
-
-
-# model.add(layers.Dense(256, activation='relu', input_shape= global_For_Class.input_shape))
-import numpy as np
-
-from hyperopt import Trials, STATUS_OK, tpe
-from keras.datasets import mnist
 from keras.layers.core import Dense, Dropout, Activation
-from keras.models import Sequential
-from keras.utils import np_utils
 
-from hyperas import optim
-from hyperas.distributions import choice, uniform
-import keras.backend as K
 from hyperopt import Trials, STATUS_OK, tpe
 from hyperas import optim
 from hyperas.distributions import choice, uniform
@@ -109,11 +67,45 @@ def create_model(X_train, Y_train, X_test, Y_test):
     model.fit(X_train, Y_train,
               batch_size={{choice([128, 256, 512])}},
               nb_epoch=20,
-              verbose=2,
+              verbose=0,
               validation_data=(X_test, Y_test))
     score, acc = model.evaluate(X_test, Y_test, verbose=0)
     print('Test accuracy:', acc)
     return {'loss': -acc, 'status': STATUS_OK, 'model': model}
+
+def create_final_model(X_train, Y_train, X_test, Y_test):
+    model = models.Sequential()
+    model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu', input_shape=(X_train.shape[1],)))
+    # choices={{choice(['one', 'two', 'three', 'four', 'five'])}}
+    choices = {{choice(['four'])}}  # based on prior checks
+    if choices == 'two':
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+    elif choices == 'three':
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+    elif choices == 'four':
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+    elif choices == 'five':
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+        model.add(Dense({{choice([32, 64, 128, 256, 512, 1024])}}, activation='relu'))
+    model.add(layers.Dense(1, activation='sigmoid'))  # the 1 means binary classification
+    model.compile(optimizer='adam'
+                  , loss='binary_crossentropy'
+                  , metrics=['accuracy'])
+    model.fit(X_train, Y_train,
+              batch_size={{choice([128, 256, 512])}},
+              nb_epoch=20,
+              verbose=0,
+              validation_data=(X_test, Y_test))
+    score, acc = model.evaluate(X_test, Y_test, verbose=0)
+    print('Test accuracy:', acc)
+    return {'loss': -acc, 'status': STATUS_OK, 'model': model}
+
+
 
 def best_result_search():
     """"
@@ -196,17 +188,102 @@ def data():
     current_path_y_test = path / f"scream_test_y.pkl"
     with current_path_y_test.open('rb') as file:
         Y_test = pkl.load(file)
-    # x_train = X_train.reshape(60000, 784)
-    # x_test = X_test.reshape(10000, 784)
-    # x_train = x_train.astype('float32')
-    # x_test = x_test.astype('float32')
-    # x_train /= 255
-    # x_test /= 255
-    # nb_classes = 1
-    # y_train = np_utils.to_categorical(Y_train, nb_classes)
-    # y_test = np_utils.to_categorical(Y_test, nb_classes)
-    # return x_train, y_train, x_test, y_test
+
     return X_train, Y_train, X_test, Y_test
+
+def data_func():
+    """
+    note i've kept the original param's names for easier origin tracking.
+    :param X_for_k_fold:  it is wwritten "k_fold" to understand easier the origin i've took it from
+    :param X_test:
+    :param y_for_k_fold:
+    :param y_test:
+    :return: normalized data for the hyper parameters search
+    """
+    """
+    Data providing function:
+
+    This function is separated from create_model() so that hyperopt
+    won't reload data for each evaluation run.
+    """
+    path = Path('pickle/hyperParamSearch')
+    current_path_x_train = path / "x_train.pkl"
+    with current_path_x_train.open('rb') as file:
+        X_train = pkl.load(file)
+
+    current_path_x_test = path / "X_test.pkl"
+    with current_path_x_test.open('rb') as file:
+        X_test = pkl.load(file)
+
+    current_path_y_train = path / "y_train.pkl"
+    with current_path_y_train.open('rb') as file:
+        Y_train = pkl.load(file)
+
+    current_path_y_test = path / "y_test.pkl"
+    with current_path_y_test.open('rb') as file:
+        Y_test = pkl.load(file)
+
+    # scale data
+    scaler = StandardScaler()
+    scaler.fit(X_train)  # must call fit before calling transform.fitting on train, using on train+test+valid
+    X_train = scaler.transform(X_train)
+    # print(np.amax(X_train_kfold))  # 9490.310668945312
+    # print(np.amax(X_train_kfold_scaled))  # 8.236592246485245
+    X_test = scaler.transform(X_test)
+
+    return X_train, Y_train, X_test, Y_test
+
+def save_data_to_pickle(X_train, X_test, y_train, y_test):
+    """
+    save test data as pkl at specific folder
+    while overriding the data there - it is ok .
+    """
+
+    path_x_test = Path(f"pickle/hyperParamSearch/X_test.pkl")
+    with path_x_test.open('wb') as file:
+        pkl.dump(X_test, file)
+    path_y_test = Path(f"pickle/hyperParamSearch/y_test.pkl")
+    with path_y_test.open('wb') as file:
+        pkl.dump(y_test, file)
+
+    current_path_x_train = Path(f"pickle/hyperParamSearch/x_train.pkl")
+    with current_path_x_train.open('wb') as file:
+        pkl.dump(X_train, file)
+
+    current_path_y_train = Path(f"pickle/hyperParamSearch/y_train.pkl")
+    with current_path_y_train.open('wb') as file:
+        pkl.dump(y_train, file)
+
+
+def get_optimised_model(X_for_k_fold, X_test, y_for_k_fold, y_test):
+    #                                            data=data_func(X_for_k_fold, X_test, y_for_k_fold, y_test)
+    save_data_to_pickle(X_for_k_fold, X_test, y_for_k_fold, y_test)
+    best_run, best_model = optim.minimize(model=create_model,
+                                          data=data_func,
+                                          algo=tpe.suggest,
+                                          max_evals=10,
+                                          trials=Trials(),
+                                          eval_space=True)
+    print(f"best_run= {best_run}")
+    return best_model
+
+def get_optimised_model_final(X_for_k_fold, X_test, y_for_k_fold, y_test):
+    """
+    return: best classifier after hyper parameter search
+    receives: split dataset for train and test and classifier label (scream, cry)
+    for pickle files directory navigation
+    """
+
+    save_data_to_pickle(X_for_k_fold, X_test, y_for_k_fold, y_test)
+    best_run_inner, best_model_inner = optim.minimize(model=create_final_model,
+                                          data=data_func,
+                                          algo=tpe.suggest,
+                                          max_evals=100,
+                                          trials=Trials(),
+                                          eval_space=True)
+    print(f"best_run= {best_run_inner}")
+    best_model_inner.summary()      # print summary
+    return best_model_inner
 
 
 if __name__ == "__main__":
@@ -227,13 +304,22 @@ if __name__ == "__main__":
     # current_path_y_test = path / f"data_for_test_y.pkl"
     # with current_path_y_test.open('rb') as file:
     #     Y_test = pkl.load(file)
+
+
+    # best_run, best_model = optim.minimize(model=create_model,
+    #                                       data=data,
+    #                                       algo=tpe.suggest,
+    #                                       max_evals=100,
+    #                                       trials=Trials(),
+    #                                       eval_space=True)
+
     best_run, best_model = optim.minimize(model=create_model,
-                                          data=data,
+                                          data=data_func,
                                           algo=tpe.suggest,
                                           max_evals=100,
                                           trials=Trials(),
                                           eval_space=True)
-    X_train, Y_train, X_test, Y_test = data()
+    X_train, Y_train, X_test, Y_test = data_func()
     print("Evalutation of best performing model:")
     print(best_model.evaluate(X_test, Y_test))
     print("Best performing model chosen hyper-parameters:")

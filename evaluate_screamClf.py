@@ -4,6 +4,7 @@ import librosa
 import librosa.display
 
 import matplotlib.pyplot as plt
+from id3 import Id3Estimator
 
 from keras import models
 from keras import layers
@@ -13,8 +14,17 @@ import pandas as pd
 import sklearn
 
 from audioread import NoBackendError
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
 from sklearn.model_selection import StratifiedKFold
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from tensorflow.python.keras.models import load_model
 
 from tqdm import tqdm
 import os
@@ -29,32 +39,10 @@ import json
 from keras.models import model_from_json
 
 from models import get_optimised_model
+from models import get_optimised_model_final
 
-from statistics import mean,stdev
-from id3 import Id3Estimator
-from sklearn.linear_model import Perceptron
-from sklearn.feature_selection import *
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import *
-from sklearn.ensemble import *
-import matplotlib.pyplot as plt
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.naive_bayes import GaussianNB
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.datasets import make_moons, make_circles, make_classification
-from sklearn.neural_network import MLPClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.svm import SVC
-from sklearn.gaussian_process import GaussianProcessClassifier
-from sklearn.gaussian_process.kernels import RBF
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
+import datetime
+
 
 #  global objects
 # todo add private/public inside class
@@ -66,15 +54,16 @@ class global_For_Clf():
         # TODO lev-future_improvement edit/add to get better results
         self.csv_initial_head = 'filename spectral_centroid zero_crossings spectral_rolloff chroma_stft rms mel_spec'
 
-        self.data_file_path = 'data_mfcc_20.csv'
+        self.data_file_path = 'csv/scream/data_experiment_3_mfcc_20.csv'
         self.min_wav_duration = 0.5  # wont use shorter wav files
         self.clf_label = 'scream'
         self.nearMissRatio = 2  # 2 means <positives amount>/2
         #                           which means were taking 50% from nearMiss_<clf label> for negatives
 
+        self.nearMiss_samples = -1  # -1 is initial invalid value which will be changed on relevant functions
         self.nearMissLabel = "NearMiss_" + str(self.clf_label)
-        self.csv_to_pkl_path = "pickle/combined_lower_amount.pkl"
-        self.path_csv_train_test_data = "csv/train_test_data.csv"  # chosen 1:1 ratio data, selected from data.csv
+        self.csv_to_pkl_path = "pickle/scream/combined_lower_amount.pkl"
+        self.path_csv_train_test_data = "csv/scream/train_test_data.csv"  # chosen 1:1 ratio data, selected from data.csv
 
         self.Kfold_testSize = 0.2
 
@@ -83,11 +72,15 @@ class global_For_Clf():
 
         self.positives = -1  # -1 represents invalid value as initial value
         self.negatives = -1
-        self.resultsPath = 'results/results.csv'
+        self.resultsPath = 'results/scream/experiments_results.csv'
 
         self.try_lower_amount = np.inf
 
         self.model = None  # here a model will be saved- the saved model shouldn't be trained
+        self.finalModelsPath= 'models/final_models'
+        self.isTrained = False
+
+        self.userInput = ''
 
     def getInputDim(self):
         amount = len(self.csv_initial_head.split()) + self.n_mfcc - 1  # -1 because filename isnt a feature
@@ -95,6 +88,11 @@ class global_For_Clf():
 
     def get_total_samples(self):
         return self.positives + self.negatives
+
+    def get_model_name(self):
+        model_name= (type(self.model)).__name__
+        return model_name
+
 
 
 class clf_Results(global_For_Clf):
@@ -208,7 +206,21 @@ def create_csv():
             sys.exit('User aborted script, data file saved :)')
     """
     if os.path.exists(data_file_path):
-        return
+        # verify table fits the mfcc number- if True- return (continue with script as usuall), else- raise Error
+        n_mfcc_number= screamGlobals.n_mfcc
+        with open(data_file_path) as csvFile:
+            reader = csv.reader(csvFile)
+            field_names_list = next(reader)  # read first row only (header)
+            mfcc_list = [x for x in field_names_list if x.startswith("mfcc")]
+            len_actual_mfcc_features = len(mfcc_list)
+        if len_actual_mfcc_features == n_mfcc_number:
+            print(f'OK: {len_actual_mfcc_features} ==  n_mfcc_number={n_mfcc_number}')
+            return
+        else:
+            raise Exception(f'len_actual_mfcc_features'
+                            f'(mfcc inside {data_file_path}={len_actual_mfcc_features},'
+                            f' but n_mfcc_number(inside globals class of this script)={n_mfcc_number},'
+                            f' values must be equal.')
 
 
     # create header for csv
@@ -312,6 +324,7 @@ def create_lower_bound_data_panda(csv_path, label):
     data_csv_negatives_nearMiss = data_csv.loc[data_csv.label == screamGlobals.nearMissLabel, :]  # take all valid rows
     nearMissActualAmount = len(data_csv_negatives_nearMiss)
     NearMissAmountToTake = nearMissActualAmount if nearMissActualAmount < nearMissMaxAmount else nearMissMaxAmount
+    screamGlobals.nearMiss_samples = NearMissAmountToTake
     # take near misses for this classifier
     data_csv_negatives_NearMiss = data_csv_negatives_nearMiss.sample(n=NearMissAmountToTake)
 
@@ -365,12 +378,34 @@ def create_lower_bound_data_panda(csv_path, label):
     return combined_lower_amount
 
 
-def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlobals, mod):
+def create_default_sequential_for_mfcc_size():
+    """
+    created this func for experiment2 due to the need of a default classifier
+    """
+
+    model = models.Sequential()
+
+    # model.add(layers.Dense(256, activation='relu', input_shape=(X_train_kfold_scaled.shape[1],)))
+    model.add(layers.Dense(32, activation='relu', input_dim=screamGlobals.getInputDim()))
+    model.add(layers.Dense(512, activation='relu'))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dense(64, activation='relu'))
+    model.add(layers.Dense(1, activation='sigmoid'))  # the 1 means binary classification
+
+    model.compile(optimizer='adam'
+                  , loss='binary_crossentropy'
+                  , metrics=['accuracy'])
+    screamGlobals.model = model
+    screamGlobals.isTrained = False
+    return model
+
+def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlobals):
     """
     param: IntPositive- the integer representing our true classifiers label, for example: for scream classifier
         if scream class is represented by 1 ==> so  IntPositive = 1 . became necessary when wanted to return f1-score
         for this class only.
     """
+    print("get_stratified_results() in process")
     # stratified split
     skf = StratifiedKFold(n_splits=k, shuffle=True)
     skf.get_n_splits(X_for_k_fold, y_for_k_fold)  # StratifiedKFold(n_splits=5, random_state=None, shuffle=True)
@@ -395,33 +430,38 @@ def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, screamGlo
         X_test_kfold_scaled = scaler.transform(X_test_kfold)
         #  X_test_scaled = scaler.transform(X_test)  #  this is done in an other place. keeping for legacy
 
-        # keras
-        # here mori will give me a pre-trained model
-        # """
-        model = models.Sequential()
+        # pre-trained model
+        model = screamGlobals.model
+        # ASSUMPTION: sequential model is already trained
+        model_name = screamGlobals.get_model_name()
 
-        # print(X_train_kfold_scaled.shape[1])  #  45 (is the number of columns for each sample)
-        # model.add(layers.Dense(256, activation='relu', input_shape=(X_train_kfold_scaled.shape[1],)))
-        model.add(layers.Dense(256, activation='relu', input_dim=screamGlobals.getInputDim()))
-        model.add(layers.Dense(128, activation='relu'))
+        if model_name != "Sequential":
+            model.fit(X_train_kfold_scaled,y_train_kfold)
+            y_fold_predicted = model.predict(X_test_kfold_scaled)
 
-        model.add(layers.Dense(64, activation='relu'))
+        else:
+            #  assert (screamGlobals.isTrained is True)
+            if screamGlobals.isTrained is True:
+                y_fold_predicted = model.predict_classes(X_test_kfold_scaled)
+            else:
+                print("untrained model is being trained")
+                #  create and train default model
+                # TODO take to outer function?
+                model = create_default_sequential_for_mfcc_size()
 
-        model.add(layers.Dense(1, activation='sigmoid'))  # the 1 means binary classification
+                # train model on training set of Kfold
+                history = model.fit(X_train_kfold_scaled,
+                                    y_train_kfold,
+                                    epochs=20,
+                                    batch_size=128)
 
-        model.compile(optimizer='adam'
-                      , loss='binary_crossentropy'
-                      , metrics=['accuracy'])
+                # save for this loop only the trained model
+                screamGlobals.model = model
+                screamGlobals.isTrained = True
 
-        screamGlobals.model = mod
-        # train model on training set of Kfold
-        # verbose = 0 disables progress output
-        # """
-        # model = screamGlobals.model
+                y_fold_predicted = model.predict_classes(X_test_kfold_scaled)
 
-        history = model.fit(X_train_kfold_scaled,y_train_kfold,epochs=20,batch_size=128,verbose=0)
 
-        y_fold_predicted = model.predict_classes(X_test_kfold_scaled)
         # print("finished_predictions")
         #  calculate scores
 
@@ -506,25 +546,11 @@ def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions):
     scores_accuracy_k_fold_repeated = []
     scores_f1_k_fold_repeated = []
     scores_k_fold_recall = []
-    id3 = Id3Estimator()
-    # id3.fit(X_train_kfold_scaled, y_train_kfold)
-    # decisionTrees = DecisionTreeClassifier()
-    # decisionTrees.fit(X_train_kfold_scaled, y_train_kfold)
-    knn = KNeighborsClassifier(3)
-    # id3.fit(X_train_kfold_scaled, y_train_kfold)
-    svc1=SVC(kernel="linear", C=0.025)
-    svc2=SVC(gamma=2, C=1)
-    gauss=GaussianProcessClassifier(1.0 * RBF(1.0))
-    decisionTrees=DecisionTreeClassifier(max_depth=25)
-    rand=RandomForestClassifier(max_depth=25, n_estimators=10, max_features=1)
-    mlp=MLPClassifier(alpha=1, max_iter=1000)
-    adaboost=AdaBoostClassifier()
-    gaussNB=GaussianNB()
-    for mod in [knn,svc1,svc2,gauss,decisionTrees,rand,mlp,adaboost,gaussNB]:
-        for repeat_number in tqdm(range(1, repetitions)):
-            score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_stratified_results(k, X_for_k_fold,
-                                                                                      y_for_k_fold, IntPositive,
-                                                                                      screamGlobals,mod)
+
+    for repeat_number in tqdm(range(1, repetitions)):
+        score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_stratified_results(k, X_for_k_fold,
+                                                                                  y_for_k_fold, IntPositive,
+                                                                                  screamGlobals)
 
         scores_accuracy_k_fold_repeated.append(score_mean_k_fold)
         scores_f1_k_fold_repeated.append(f1_mean_k_fold)
@@ -539,14 +565,13 @@ def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions):
 def get_model_head():
     if screamGlobals.model is None:
         raise Exception("No model, supply a model please.")
-    # config = screamGlobals.model.get_config()
-    # model_name= config['name']
-    model_name='ID3'
+
+    model_name = screamGlobals.get_model_name()
     #  additional info will be in a single cell in the CSV so we seperate info by a double-underline:  __
-    additional_info = f''
-    if model_name.startswith("sequential"):
+    if model_name == "Sequential":
         additional_info = f'model_layers={len(screamGlobals.model.layers)}'
-    #  add here else statement in case we deal with other models
+    else:
+        additional_info = 'None'
 
     csv_model_head = f'model_name model_info'
     csv_model_results = f'{model_name} {additional_info}'
@@ -566,7 +591,8 @@ def results_to_csv(csv_results_head, csv_results):
     # TODO- get_model_head() can be optimized in future versions to separate head from results
     csv_model_head, csv_model_results = get_model_head()
 
-    csv_final_results = csv_results + ' ' + csv_data_results + ' ' + csv_features_results+ ' ' + csv_model_results
+    csv_final_results = csv_results + ' ' + csv_data_results + ' ' \
+                        + csv_features_results + ' ' + csv_model_results + ' ' + screamGlobals.userInput
     # TODO enter also model params according to moris suggestion- name, hyper params
 
     if not os.path.exists(screamGlobals.resultsPath):
@@ -576,7 +602,8 @@ def results_to_csv(csv_results_head, csv_results):
 
         csv_features_head = f'n_mfcc_amount'
 
-        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' + csv_features_head+ ' ' + csv_model_head
+        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' \
+                         + csv_features_head+ ' ' + csv_model_head + ' ' + 'userInput'
 
         # save to csv (append new lines)
 
@@ -628,35 +655,522 @@ def experiment_data_size():
     results_to_csv(csv_results_head, csv_results)
 
 def different_model():
+    """
+    goal: run with different sample sizes to understand on different models (changed manually inside the script
+        the models) and verified with a csv results file which direction should we take ...
+
+        in this function we run also an automated imported algorithm to find best model parameters and then ran
+        our algo with our custom kfold on our custom data with spesific ratio's positive:negative and
+         negative: nearMiss_negative to find best classifier
+    """
     # lower size must be > Nearmiss
+
     for size in tqdm([100,150,200,250,300,350,400]):
         screamGlobals.try_lower_amount = size
         experiment_data_size()
 
-def experiments():
-    different_model()
+
+def get_best_model_results(optimised_model, X_test, y_test, IntPositive, X_for_k_fold, y_for_k_fold):
+
+    y_fold_predicted = optimised_model.predict_classes(X_test)
+
+    print(y_fold_predicted, end='')
+    print(y_test, end='')
+
+    accuracy = sklearn.metrics.precision_score(y_test, y_fold_predicted, average='micro')
+    #  take f1_score only for the classifiers class
+    f1 = sklearn.metrics.f1_score(y_test, y_fold_predicted, pos_label=IntPositive, average='binary')
+    # recall for positive class
+    recall = sklearn.metrics.recall_score(y_test, y_fold_predicted, pos_label=IntPositive,
+                                                average='binary')
+
+    print(f' accuracy, f1, recall: ', accuracy, f1, recall)
+
+    print("now on trained (off the record): ")
+    y_fold_predicted = optimised_model.predict_classes(X_for_k_fold)
+    print(y_fold_predicted, end='')
+    print(y_for_k_fold, end='')
+
+    accuracy_trained = sklearn.metrics.precision_score(y_for_k_fold, y_fold_predicted, average='micro')
+    #  take f1_score only for the classifiers class
+    f1_trained = sklearn.metrics.f1_score(y_for_k_fold, y_fold_predicted, pos_label=IntPositive, average='binary')
+    # recall for positive class
+    recall_trained = sklearn.metrics.recall_score(y_for_k_fold, y_fold_predicted, pos_label=IntPositive,
+                                                average='binary')
+    print(f' accuracy, f1, recall: ', accuracy_trained, f1_trained, recall_trained)
+
+    return accuracy, f1, recall
 
 
-if __name__ == "__main__":
-    screamGlobals = global_For_Clf()  #  create global variable
-    experiments()
-
-
+def get_best_model(combined_lower_amount):
     """
-    # TODO lev:covering for now to prevent shadowing of screamGlobals...later i'll see if i need this main at all
-    
+    first prepares data for test and train groups, then
+    returns best model with best hyper-parameters
+    """
+
+
+    # prepare dataFrame for stratified and for split
+    data_no_fileName = combined_lower_amount.drop(['filename'], axis=1)
+    #  print(data_no_fileName.shape)  # ( , ) with label column
+
+    # encode strings of labels to integers
+    labels_list = data_no_fileName.iloc[:, -1]
+    # print(labels_list.shape)  # (734,)
+    encoder = LabelEncoder()
+    encoded_labels_csv = np.array(encoder.fit_transform(labels_list))
+    # print(encoded_labels_csv)  #  [0 0 0 ... 1 1 1]
+
+    # print(encoded_labels_csv.shape) # (734,)
+
+    # print(list(encoder.inverse_transform([0,1])))  #  ['negative', 'scream']
+
+    # take all except labels column. important to add the dtype=float, otherwise im getting an error in the kfold.
+    only_features = np.array(data_no_fileName.iloc[:, :-1], dtype=float)
+    #  print(only_features.shape)  # ( , )
+
+    """"
+    splitting stages
+    """
+    # split for test and k-fold
+    X_for_k_fold, X_test, y_for_k_fold, y_test = train_test_split \
+        (only_features, encoded_labels_csv, test_size=screamGlobals.Kfold_testSize, stratify=encoded_labels_csv)
+    # print(len(y_for_k_fold))  # 587
+    # print(len(y_test))  # 147
+
+    # after stratify- lets keep only binary classification (merging Near Miss and Far miss into one label
+    print("merging all negative labels into one label")
+
+    # find the positive label transformation
+    clf_label_int = encoder.transform([screamGlobals.clf_label])[0]  # 0 because it returns a list
+    #  print(clf_label_int)  # 2
+
+    # give temp values in order to prevent conflicts
+    tempIntLabel: int = 111
+    IntNegative: int = 0
+    IntPositive: int = 1
+    y_for_k_fold[y_for_k_fold == clf_label_int] = tempIntLabel
+    y_test[y_test == clf_label_int] = tempIntLabel
+
+    y_for_k_fold[y_for_k_fold != tempIntLabel] = IntNegative
+    y_test[y_test != tempIntLabel] = IntNegative
+
+    # switch to binary
+    y_for_k_fold[y_for_k_fold == tempIntLabel] = IntPositive
+    y_test[y_test == tempIntLabel] = IntPositive
+
+    #  now, y_test is binary, 0 represents the true label of the classifier
+
+    # find models best hyper-parameters
+    optimised_model = get_optimised_model_final(X_for_k_fold, X_test, y_for_k_fold, y_test)
+    screamGlobals.model = optimised_model
+    print(f"finished optimizing our model")
+
+    accuracy, f1, recall = get_best_model_results(optimised_model,
+                                                  X_test, y_test, IntPositive, X_for_k_fold, y_for_k_fold)
+
+    return optimised_model, accuracy, f1, recall
+
+
+def model_results_to_csv(csv_results_head, csv_results):
+    # printing results to csv for tracking
+    print("results_to_csv")
+    csv_data_results = f'{screamGlobals.clf_label} {screamGlobals.get_total_samples()}' \
+                       f' {screamGlobals.positives} {screamGlobals.negatives}' \
+                       f' {screamGlobals.getInputDim()} {screamGlobals.Kfold_testSize} {screamGlobals.k_folds}' \
+                       f' {screamGlobals.k_fold_repetitions} {screamGlobals.sampling_data_repetitions}'
+
+    csv_features_results = f'{screamGlobals.n_mfcc}'
+
+    # TODO- get_model_head() can be optimized in future versions to separate head from results
+    csv_model_head, csv_model_results = get_model_head()
+
+    csv_final_results = csv_results + ' ' + csv_data_results + ' ' + csv_features_results + ' ' + csv_model_results
+    # TODO enter also model params according to moris suggestion- name, hyper params
+
+    if not os.path.exists(screamGlobals.resultsPath):
+        csv_data_head = f'clf_label total_samples positives negatives total_features test' \
+                        f'_size_ratio folds kfold_repeats' \
+                        f' sampling_repeats'
+
+        csv_features_head = f'n_mfcc_amount'
+
+        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' + csv_features_head+ ' ' + csv_model_head
+
+        # save to csv (append new lines)
+
+        #  file doesnt exist- lets create with header
+        file = open(screamGlobals.resultsPath, 'w', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(csv_final_head.split())
+    else:
+        # file exists with header- just add lines
+        file = open(screamGlobals.resultsPath, 'a', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(csv_final_results.split())
+
+
+def save_model_and_weights(best_model):
+    """
+    :param best_model:
+
+        new keras version allows saving a trained-model with weights in one line of code
+    """
+    model_path = str(f'{screamGlobals.finalModelsPath}/{screamGlobals.clf_label}_clf_mfcc_{screamGlobals.n_mfcc}.h5')
+    print(model_path)
+
+    # new version doesnt require weights
+    best_model.save(model_path)
+    print("Saved model to disk")
+
+
+
+def save_best_model():
+    """
+    goal: after getting results with <different_model()> , we now have a much more limited search range in which
+    we will find our best model
+    """
+    print("executing screamClf flow- save best model")
+
+    # change global definitions at the top of the file inside global_For_Clf class #todo lev maybe create config file
+    # screamGlobals = global_For_Clf()
+    create_csv()  #  need to create only once, but for now its already created
+
+    # lev testing parameter
+    # screamGlobals.try_lower_amount= lower_bound_per_class  #  this is used in an outer function in a different file
+
+    lower_bound_data_panda = create_lower_bound_data_panda(screamGlobals.data_file_path,
+                                                           screamGlobals.clf_label)
+
+    optimised_model, accuracy, f1, recall = get_best_model(lower_bound_data_panda)
+
+    # gather results
+    csv_results_head = f'total_accuracy f1_{screamGlobals.clf_label} recall_{screamGlobals.clf_label}'
+
+
+    # csv_results = f'{mean_accuracy_sampling} {mean_f1_sampling} {mean_recall_sampling}'
+    csv_results = f'{accuracy} {f1} {recall}'
+
+    model_results_to_csv(csv_results_head, csv_results)
+
+    save_model_and_weights(optimised_model)
+
+
+def load_bestModel():
+
+    # load model
+    model_path = str(f'{screamGlobals.finalModelsPath}/{screamGlobals.clf_label}_clf_mfcc_{screamGlobals.n_mfcc}.h5')
+    if not os.path.exists(model_path):
+        print(f'{model_path} doesnt exist, running save_best_model() to save best model')
+        save_best_model()
+        print("finished saving model- continue with loading")
+
+    print("loading model from {model_path}")
+    model= load_model(model_path)
+    model.summary()
+    screamGlobals.isTrained = True
+    return model
+
+
+def experiment_data_size_with_model():
     print("executing screamClf flow")
     # change global definitions at the top of the file inside global_For_Clf class #todo lev maybe create config file
     # screamGlobals = global_For_Clf()
-    # create_csv()  #  need to create only once, but for now its already created
+    create_csv()  #  need to create only once, but for now its already created
 
     # lev testing parameter
+    # screamGlobals.try_lower_amount= lower_bound_per_class  #  this is used in an outer function in a different file
 
     accuracy_sampling = []  # each iteration will append avg accuracy value
     f1_sampling = []
     recall_sampling = []
     for sample_number in tqdm(range(1, screamGlobals.sampling_data_repetitions)):
-        lower_bound_data_panda = create_lower_bound_data_panda(screamGlobals.data_file_path, screamGlobals.clf_label)
+        lower_bound_data_panda = create_lower_bound_data_panda(screamGlobals.data_file_path,
+                                                               screamGlobals.clf_label)
+
+        score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_Repeated_strtfy_results \
+            (lower_bound_data_panda, screamGlobals.k_folds, screamGlobals.k_fold_repetitions)
+
+        accuracy_sampling.append(score_mean_k_fold)
+        f1_sampling.append(f1_mean_k_fold)
+        recall_sampling.append(recall_k_fold)
+
+    mean_accuracy_sampling = np.mean(np.array(accuracy_sampling))
+    mean_f1_sampling = np.mean(np.array(f1_sampling))
+    mean_recall_sampling = np.mean(np.array(recall_sampling))
+
+    # gather results
+    csv_results_head = f'total_accuracy f1_{screamGlobals.clf_label} recall_{screamGlobals.clf_label}'
+
+    csv_results = f'{mean_accuracy_sampling} {mean_f1_sampling} {mean_recall_sampling}'
+
+    if screamGlobals.resultsPath == 'results/scream/experiment3.csv':
+        print("CSV for experiment3")
+        results_to_csv_experiment3(csv_results_head, csv_results)
+    else:
+        results_to_csv(csv_results_head, csv_results)
+
+
+
+def evaluate_model(model):
+    """
+    different_model() , but updated with model as input
+
+    goal: run with different sample sizes to understand on different models (changed manually inside the script
+        the models) and verified with a csv results file which direction should we take ...
+
+        in this function we run also an automated imported algorithm to find best model parameters and then ran
+        our algo with our custom kfold on our custom data with spesific ratio's positive:negative and
+         negative: nearMiss_negative to find best classifier
+    """
+    # lower size must be > Nearmiss
+    screamGlobals.model = model  # 100,150,200,250,300,350,400
+    #  TODO can automate the process of choosing data sizes
+    for size in tqdm([100,150,200,250,300,350,400]):
+        screamGlobals.try_lower_amount = size
+        experiment_data_size_with_model()
+
+
+def evaluate_model_different_data_size(model):
+    """
+    different_model() , but updated with model as input
+
+    goal: run with different sample sizes to understand on different models (changed manually inside the script
+        the models) and verified with a csv results file which direction should we take ...
+
+        in this function we run also an automated imported algorithm to find best model parameters and then ran
+        our algo with our custom kfold on our custom data with spesific ratio's positive:negative and
+         negative: nearMiss_negative to find best classifier
+    """
+    # lower size must be > Nearmiss
+    screamGlobals.model = model  # 100,150,200,250,300,350,400
+    #  TODO can automate the process of choosing data sizes
+    for size in tqdm([100,150,200,250,300,350,400]):
+        screamGlobals.try_lower_amount = size
+        experiment_data_size_with_model()
+
+
+def evaluate_best_model():
+    model = load_bestModel()
+    evaluate_model(model)
+
+
+def save_evaluate_bestModel():
+    save_best_model()
+    evaluate_best_model()
+
+
+def compare_different_models():
+    """
+    save to csv results from different models
+    """
+    # create all the relevant models
+    # load best_model with best hyper parameters- this one is already trained
+    screamGlobals.userInput = 'compare_different_models-10%_nearmiss_instead_of_50%'
+
+    best_model = load_bestModel()
+    # create other models TODO - can put in different function all the creations of models
+    id3 = Id3Estimator()
+    knn = KNeighborsClassifier(3)
+    svc1 = SVC(kernel="linear", C=0.025)
+    svc2 = SVC(gamma=2, C=1)
+    gauss = GaussianProcessClassifier(1.0 * RBF(1.0))
+    decisionTrees = DecisionTreeClassifier(max_depth=25)
+    rand = RandomForestClassifier(max_depth=25, n_estimators=10, max_features=1)
+    adaboost = AdaBoostClassifier()
+    gaussNB = GaussianNB()
+    mlp = MLPClassifier(alpha=1, max_iter=100)
+
+    models_to_check = [best_model, id3, knn, svc1, svc1, svc2, gauss, decisionTrees, rand, gaussNB, adaboost, mlp]
+
+    for model in tqdm(models_to_check):
+        name = type(model).__name__
+        print(f'checking model: {name}')
+        evaluate_model(model)
+
+
+def get_date():
+    """
+    :return: current date with in the next format:   2019-08-21
+    """
+
+    mylist = []
+    today = datetime.date.today()
+    mylist.append(today)
+    date = mylist[0]
+    return date
+
+
+def get_models_to_check():
+    """
+
+    :return: a list of models (classifiers)
+    """
+    # load best_model with best hyper parameters- this one is already trained
+    best_model = load_bestModel()
+    id3 = Id3Estimator()
+    knn = KNeighborsClassifier(3)
+    svc1 = SVC(kernel="linear", C=0.025)
+    svc2 = SVC(gamma=2, C=1)
+    gauss = GaussianProcessClassifier(1.0 * RBF(1.0))
+    decisionTrees = DecisionTreeClassifier(max_depth=25)
+    rand = RandomForestClassifier(max_depth=25, n_estimators=10, max_features=1)
+    adaboost = AdaBoostClassifier()
+    gaussNB = GaussianNB()
+    mlp = MLPClassifier(alpha=1, max_iter=100)
+
+    models_to_check = [best_model, id3, knn, svc1, svc2, gauss, decisionTrees, rand, gaussNB, adaboost, mlp]
+    return models_to_check
+
+
+def experiment1():
+    """
+    save to csv results from different models with different dataset sizes
+
+    check how different data size influences the accuracy and whether the accuracy converges/decreases.
+    """
+
+    # set global variables for experiment
+    date = get_date()
+    screamGlobals.userInput = f'experiment_1_date_{date}'
+    screamGlobals.data_file_path = 'csv/scream/data_experiment_1.csv'
+
+    # get all the relevant models
+    models_to_check = get_models_to_check()
+
+    for model in tqdm(models_to_check):
+        name = type(model).__name__
+        print(f'checking model: {name}')
+        evaluate_model_different_data_size(model)
+
+
+def create_csv_different_mfcc():
+    """
+    input: uses screamGlobals for input
+    output: .csv file with screamGlobals.csv_initial_head columns
+    """
+    # important variables
+    data_file_path = screamGlobals.data_file_path
+    min_wav_duration = screamGlobals.min_wav_duration
+    #  print(data_file_path, min_wav_duration)
+    """
+    #  prevent data file over run by accident
+    if os.path.exists(data_file_path):
+        text = input(f'Press the space bar to override {data_file_path} and continue with the script')
+        if text != ' ':
+            sys.exit('User aborted script, data file saved :)')
+    """
+
+    #  covering- allow running over the csv for faster results for experiment 2
+    
+    if os.path.exists(data_file_path):
+        # verify table fits the mfcc number- if True- return (continue with script as usuall), else- raise Error
+        n_mfcc_number= screamGlobals.n_mfcc
+        with open(data_file_path) as csvFile:
+            reader = csv.reader(csvFile)
+            field_names_list = next(reader)  # read first row only (header)
+            mfcc_list = [x for x in field_names_list if x.startswith("mfcc")]
+            len_actual_mfcc_features = len(mfcc_list)
+        if len_actual_mfcc_features == n_mfcc_number:
+            print(f'OK: {len_actual_mfcc_features} ==  n_mfcc_number={n_mfcc_number}')
+            return
+        else:
+            raise Exception(f'len_actual_mfcc_features'
+                            f'(mfcc inside {data_file_path}={len_actual_mfcc_features},'
+                            f' but n_mfcc_number(inside globals class of this script)={n_mfcc_number},'
+                            f' values must be equal.')
+
+
+    # create header for csv
+    header = screamGlobals.csv_initial_head
+    fcc_amount = screamGlobals.n_mfcc
+    for i in range(1, fcc_amount + 1):
+        header += f' mfcc_{i}'
+    header += ' label'
+    header = header.split()  # split by spaces as default
+
+    file = open(data_file_path, 'w', newline='')
+    with file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+
+    # load features from each wav file- put inside the lines below as a function
+
+    # reaching each wav file
+    path_train = Path("train")
+    for path_label in sorted(path_train.iterdir()):
+        print("currently in : " + str(path_label))  # train\negative
+        positiveOrNegative = path_label.name  # negative
+        #  print(label)
+        for path_class in tqdm(sorted(path_label.iterdir())):
+            # print info
+            print("currently in class: " + str(path_class))
+            # print amount of files in directory
+            onlyfiles = next(os.walk(path_class))[2]  # dir is your directory path as string
+            wav_amount: int = len(onlyfiles)
+            print("wav amount= " + str(wav_amount))
+            #  true_class= path_class.name
+            #  print(true_class)
+            #  print(path_class)  #  train\negative\scream
+            #  print("name: "+ str(path_class.name))
+
+            # lev improvement according to coordination with mori- irrelevant since 7.8.19
+            if (positiveOrNegative == "positive"):
+                label = path_class.name  # scream
+            else:
+                """
+                lev- updating to differentiate near misses and far misses.
+                keeping if-else structure for future options
+
+                old:
+                print(f"switching label from {path_class.name} to <negative>")  # added reporting
+                label = "negative"
+                new:
+
+                """
+                label = path_class.name  # NearMiss_scream
+
+            wave_file_paths = path_class.glob('**/*.wav')  # <class 'generator'>
+            #  print(type(wave_file_paths))
+            count = 0  # for progress tracking
+            print('covered WAV files: ')
+            for wav_path in sorted(wave_file_paths):
+                count += 1
+                if (count % 50) == 0:
+                    fp = sys.stdout
+                    print(str(count), end=' ')
+                    fp.flush()  # makes print flush its buffer (doesnt print without it)
+                #  print(type(wav_path))  #  <class 'pathlib.WindowsPath'>
+                #  print(wav_path)  #  train\positive\scream\110142__ryding__scary-scream-4.wav
+                #  print(wav_path.name)  #  110142__ryding__scary-scream-4.wav
+                try:
+                    #  keeping as parameters data_file_path, min_wav_duration even though its in screamGlobals
+                    #  in order to emphasis its an inner function of create_csv()
+                    extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration, fcc_amount)
+                except NoBackendError as e:
+                    print("audioread.NoBackendError " + "for wav path " + str(wav_path))
+                    continue  # one file didnt work, continue to next one
+
+
+
+
+def experiment_data_size_with_model_different_mfcc():
+    print("executing screamClf flow")
+    # change global definitions at the top of the file inside global_For_Clf class #todo lev maybe create config file
+    # screamGlobals = global_For_Clf()
+    create_csv_different_mfcc()  #  need to create only once, but for now its already created
+
+    # lev testing parameter
+    # screamGlobals.try_lower_amount= lower_bound_per_class  #  this is used in an outer function in a different file
+
+    accuracy_sampling = []  # each iteration will append avg accuracy value
+    f1_sampling = []
+    recall_sampling = []
+    for sample_number in tqdm(range(1, screamGlobals.sampling_data_repetitions)):
+        lower_bound_data_panda = create_lower_bound_data_panda(screamGlobals.data_file_path,
+                                                               screamGlobals.clf_label)
+
         score_mean_k_fold, f1_mean_k_fold, recall_k_fold = get_Repeated_strtfy_results \
             (lower_bound_data_panda, screamGlobals.k_folds, screamGlobals.k_fold_repetitions)
 
@@ -674,6 +1188,162 @@ if __name__ == "__main__":
     csv_results = f'{mean_accuracy_sampling} {mean_f1_sampling} {mean_recall_sampling}'
 
     results_to_csv(csv_results_head, csv_results)
-    
-    
+
+
+
+def experiment2():
     """
+    save to csv results from different models with different mfcc sizes
+    """
+    print("experiment2 in progress")
+    # set global variables for experiment
+    date = get_date()
+    screamGlobals.userInput = f'experiment_2_date_{date}'
+
+    # get all the relevant models
+    models_to_check = get_models_to_check()
+
+    #  logically the loops should be switched, but it's better for mfcc loop to be the outer one for faster run-time
+    for size in tqdm([1, 5, 10, 12, 15, 20, 25, 30, 35, 40]):
+        screamGlobals.n_mfcc = size
+
+        for model in tqdm(models_to_check):
+            name = type(model).__name__
+            print(f'checking model: {name}')
+            screamGlobals.model = model
+            screamGlobals.isTrained = False
+
+            mfcc_amount = size
+            screamGlobals.data_file_path = f'csv/scream/data_experiment_2_mfcc_{mfcc_amount}.csv'
+
+            experiment_data_size_with_model_different_mfcc()
+
+
+
+def experiments():
+    # different_model()
+    # save_evaluate_bestModel()
+    # load_best_run_on_test()
+    compare_different_models()
+
+
+def results_to_csv_experiment3(csv_results_head, csv_results):
+    """
+    Created this func especially for experiment3.
+    the difference from original func "results_to_csv" is that here we also calculate
+    near-miss elements into the CSV and i didnt want to mess with the CSV format of previous/future results.
+    """
+
+    # printing results to csv for tracking
+    print("results_to_csv for experiment3")
+    csv_data_results = f'{screamGlobals.clf_label} {screamGlobals.get_total_samples()}' \
+                       f' {screamGlobals.positives} {screamGlobals.negatives}' \
+                       f' {screamGlobals.nearMissRatio} {screamGlobals.nearMiss_samples}' \
+                       f' {screamGlobals.getInputDim()} {screamGlobals.Kfold_testSize} {screamGlobals.k_folds}' \
+                       f' {screamGlobals.k_fold_repetitions} {screamGlobals.sampling_data_repetitions}'
+
+    csv_features_results = f'{screamGlobals.n_mfcc}'
+
+    # TODO- get_model_head() can be optimized in future versions to separate head from results
+    csv_model_head, csv_model_results = get_model_head()
+
+    csv_final_results = csv_results + ' ' + csv_data_results + ' ' \
+                        + csv_features_results + ' ' + csv_model_results + ' ' + screamGlobals.userInput
+    # TODO enter also model params according to moris suggestion- name, hyper params
+
+    if not os.path.exists(screamGlobals.resultsPath):
+        csv_data_head = f'clf_label total_samples positives negatives nearMiss_ratio nearMiss_samples' \
+                        f' total_features test_size_ratio folds kfold_repeats' \
+                        f' sampling_repeats'
+
+        csv_features_head = f'n_mfcc_amount'
+
+        csv_final_head = csv_results_head + ' ' + csv_data_head + ' ' \
+                         + csv_features_head+ ' ' + csv_model_head + ' ' + 'userInput'
+
+        # save to csv (append new lines)
+
+        #  file doesnt exist- lets create with header
+        file = open(screamGlobals.resultsPath, 'w', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(csv_final_head.split())
+    else:
+        # file exists with header- just add lines
+        file = open(screamGlobals.resultsPath, 'a', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(csv_final_results.split())
+
+
+
+
+def experiment3():
+    """
+    save to csv results from different models with different NearMiss ratio
+    """
+    print("experiment3 in progress")
+    # set global variables for experiment
+    date = get_date()
+    screamGlobals.userInput = f'experiment_3_date_{date}'
+    screamGlobals.resultsPath = 'results/scream/experiment3.csv'
+
+    # get all the relevant models
+    models_to_check = get_models_to_check()
+    # 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+    nearMiss_ratios = [1,2, 10, 20, 40, 80, 160]
+    for ratio in tqdm(nearMiss_ratios):
+        screamGlobals.nearMissRatio = ratio
+
+        for model in tqdm(models_to_check):
+            name = type(model).__name__
+            print(f'checking model: {name}')
+            screamGlobals.model = model
+
+            experiment_data_size_with_model()
+
+
+def experiment5():
+    """
+    save to csv results from different models
+    """
+    print("experiment5 in progress")
+    # set global variables for experiment
+    date = get_date()
+    screamGlobals.userInput = f'experiment_5_date_{date}'
+
+    # get all the relevant models
+    models_to_check = get_models_to_check()
+
+    for model in tqdm(models_to_check):
+        name = type(model).__name__
+        print(f'checking model: {name}')
+        screamGlobals.model = model
+
+        screamGlobals.data_file_path = f'csv/scream/data_experiment_2_mfcc_20.csv'
+
+        experiment_data_size_with_model_different_mfcc()
+
+
+    # now check best model with 15 as mfcc resolution
+    screamGlobals.n_mfcc = 15
+    screamGlobals.data_file_path = f'csv/scream/data_experiment_2_mfcc_15.csv'
+
+    screamGlobals.model = load_bestModel()
+    experiment_data_size_with_model()
+
+
+
+def experiments_for_report():
+    """
+    perform experiments for the final report
+    """
+    # experiment1()
+    # experiment2()
+    # experiment3()
+    experiment5()
+
+if __name__ == "__main__":
+    screamGlobals = global_For_Clf()  #  create global variable
+    # experiments()
+    experiments_for_report()

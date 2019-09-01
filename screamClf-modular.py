@@ -45,8 +45,8 @@ class global_For_Clf():
         #                           which means were taking 50% from nearMiss_<clf label> for negatives
 
         self.nearMissLabel= "NearMiss_"+str(self.clf_label)
-        self.csv_to_pkl_path= "pickle/combined_lower_amount.pkl"
-        self.path_csv_train_test_data = "csv/train_test_data.csv"  # chosen 1:1 ratio data, selected from data.csv
+        self.csv_to_pkl_path= "pickle/scream/combined_lower_amount.pkl"
+        self.path_csv_train_test_data = "csv/scream/train_test_data.csv"  # chosen 1:1 ratio data, selected from data.csv
 
         self.Kfold_testSize= 0.2
 
@@ -363,15 +363,15 @@ def splittingData(k, pkl_path):
     y_test[y_test == tempIntLabel] = IntPositive
 
     # safely handle existing pickle files
-    if os.path.exists('pickle/X_test.pkl'):
+    if os.path.exists('pickle/scream/X_test.pkl'):
         text = input(f'Press the space bar once and then press Enter to override all pickle files and continue with the script')
         if text != ' ':
             sys.exit('User aborted script, pickle files saved :)')
     # save test data as pkl
-    path_x_test = Path("pickle/X_test.pkl")
+    path_x_test = Path("pickle/scream/X_test.pkl")
     with path_x_test.open('wb') as file:
         pkl.dump(X_test, file)
-    path_y_test = Path("pickle/y_test.pkl")
+    path_y_test = Path("pickle/scream/y_test.pkl")
     with path_y_test.open('wb') as file:
         pkl.dump(y_test, file)
 
@@ -381,7 +381,7 @@ def splittingData(k, pkl_path):
     # print(skf)
 
     fold_num = 1  # use for saving pkl files with different names
-    path = Path('pickle/folds')
+    path = Path('pickle/scream/folds')
     for train_index, test_index in skf.split(X_for_k_fold, y_for_k_fold):
         X_train_kfold, X_test_kfold = X_for_k_fold[train_index], X_for_k_fold[test_index]
         y_train_kfold, y_test_kfold = y_for_k_fold[train_index], y_for_k_fold[test_index]
@@ -422,10 +422,10 @@ def normalize_builtClassifier(k):
     scale on training set only, then use the returned "fit" parameters to scale validation and test
     """
     # load from pickle test data
-    path_x_test = Path("pickle/X_test.pkl")
+    path_x_test = Path("pickle/scream/X_test.pkl")
     with path_x_test.open('rb') as file:
         X_test_loaded = pkl.load(file)
-    path_y_test = Path("pickle/y_test.pkl")
+    path_y_test = Path("pickle/scream/y_test.pkl")
     with path_y_test.open('rb') as file:
         y_test_loaded = pkl.load(file)
 
@@ -433,7 +433,7 @@ def normalize_builtClassifier(k):
     # print(y_test_loaded.shape)  # (147,)
 
     # built loop from 1-k including upper bound...first of all load pickle, then normalize, then send to keras...
-    path = Path('pickle/folds')
+    path = Path('pickle/scream/folds')
     for fold in range(1, k + 1):
         current_path_x_train = path / f"X_train_kfold_{fold}.pkl"
         with current_path_x_train.open('rb') as file:
