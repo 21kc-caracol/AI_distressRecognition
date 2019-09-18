@@ -43,7 +43,6 @@ from models import get_optimised_model_final
 
 import datetime
 
-
 #  global objects
 # todo add private/public inside class
 class global_For_Clf():
@@ -51,6 +50,7 @@ class global_For_Clf():
         #  changed for every class (for example: scream, cry, ...)
         self.clf_label = clf_label  # have to create a clf with a label
 
+        # keeping the hardcoded 20 mfcc below until end of project submission, later update it to generic mfcc amount
         self.data_file_path = 'csv/'+str(self.get_clf_label())+'/data_'+str(self.get_clf_label())+'_mfcc_20.csv'  # cry
         self.csv_to_pkl_path = 'pickle/'+str(self.get_clf_label())+'/combined_lower_amount.pkl' # relevant to modular file TODO currently this is only for scream
         self.path_csv_train_test_data = 'csv/'+str(self.get_clf_label())+'/train_test_data.csv'  # chosen 1:1 ratio data, selected from data.csv
@@ -509,10 +509,21 @@ def get_Repeated_strtfy_results(combined_lower_amount, k, repetitions):
 
     # lev solve bug: should have only 3 labels at this point: <clf_label true>, NearMiss_<clf_name>, and everything else
     clf_label_int = encoder.transform([clfGlobals.clf_label])[0]  # 0 because it returns a list
+
+    # lev fix for 0 amount Near_Miss
+    if nearMiss_clf_amount > 0:
+        clf_NearMiss_label_int = encoder.transform([clfGlobals.nearMissLabel])[0]  # TODO?
+    else:
+        clf_NearMiss_label_int = -1  #  -1 is illegal coding
+    in_case_int_is_zero = 8  # power of 2 - easier for micro commands
+    others_int = clf_label_int + clf_NearMiss_label_int + in_case_int_is_zero  # label for all others
+
+    """
+    Old code b4 fix for 0 Near_miss- delete after october 2019
     clf_NearMiss_label_int = encoder.transform([clfGlobals.nearMissLabel])[0]
     in_case_int_is_zero = 2
     others_int = clf_label_int + clf_NearMiss_label_int + in_case_int_is_zero # label for all others
-
+    """
     encoded_labels_csv[(encoded_labels_csv != clf_label_int) & (encoded_labels_csv != clf_NearMiss_label_int)] = others_int
     label_coded_amount = len(encoded_labels_csv[encoded_labels_csv == clf_label_int])
     nearMiss_coded_amount = len(encoded_labels_csv[encoded_labels_csv == clf_NearMiss_label_int])
@@ -741,9 +752,28 @@ def get_best_model(combined_lower_amount):
     # encode strings of labels to integers
     labels_list = data_no_fileName.iloc[:, -1]
     # print(labels_list.shape)  # (734,)
+
+    clf_labels_amount = len(data_no_fileName.loc[data_no_fileName['label'] == clfGlobals.clf_label])
+    nearMiss_clf_amount = len(data_no_fileName.loc[data_no_fileName['label'] == clfGlobals.nearMissLabel])
+
     encoder = LabelEncoder()
     encoded_labels_csv = np.array(encoder.fit_transform(labels_list))
-    # print(encoded_labels_csv)  #  [0 0 0 ... 1 1 1]
+    #  print(encoded_labels_csv)  # [0 0 0 ... 1 1 1]
+
+    # lev solve bug: should have only 3 labels at this point: <clf_label true>, NearMiss_<clf_name>, and everything else
+    clf_label_int = encoder.transform([clfGlobals.clf_label])[0]  # 0 because it returns a list
+    if nearMiss_clf_amount > 0:
+        clf_NearMiss_label_int = encoder.transform([clfGlobals.nearMissLabel])[0]  # TODO?
+    else:
+        clf_NearMiss_label_int = -1  #  -1 is illegal coding
+    in_case_int_is_zero = 8  # power of 2 - easier for micro commands
+    others_int = clf_label_int + clf_NearMiss_label_int + in_case_int_is_zero  # label for all others
+
+    encoded_labels_csv[(encoded_labels_csv != clf_label_int) & (encoded_labels_csv != clf_NearMiss_label_int)] = others_int
+    label_coded_amount = len(encoded_labels_csv[encoded_labels_csv == clf_label_int])
+    nearMiss_coded_amount = len(encoded_labels_csv[encoded_labels_csv == clf_NearMiss_label_int])
+    assert(label_coded_amount == clf_labels_amount)
+    assert (nearMiss_coded_amount == nearMiss_clf_amount)
 
     # print(encoded_labels_csv.shape) # (734,)
 
@@ -752,6 +782,7 @@ def get_best_model(combined_lower_amount):
     # take all except labels column. important to add the dtype=float, otherwise im getting an error in the kfold.
     only_features = np.array(data_no_fileName.iloc[:, :-1], dtype=float)
     #  print(only_features.shape)  # ( , )
+
 
     """"
     splitting stages
@@ -1061,7 +1092,7 @@ def experiment1():
 
     # set global variables for experiment
     date = get_date()
-    clfGlobals.userInput = f'experiment_1_date_{date}'+'lev_tests_generic_ignore_scores'
+    clfGlobals.userInput = f'experiment_1_date_{date}'
     clfGlobals.data_file_path = 'csv/'+str(clfGlobals.get_clf_label())+'/data_experiment_1.csv'
 
     # get all the relevant models
@@ -1222,7 +1253,7 @@ def experiment2():
     print("experiment2 in progress")
     # set global variables for experiment
     date = get_date()
-    clfGlobals.userInput = f'experiment_2_date_{date}'+'lev_tests_generic_ignore_scores'
+    clfGlobals.userInput = f'experiment_2_date_{date}'
 
     # get all the relevant models
     models_to_check = get_models_to_check()
@@ -1306,7 +1337,7 @@ def experiment3():
     print("experiment3 in progress")
     # set global variables for experiment
     date = get_date()
-    clfGlobals.userInput = f'experiment_3_date_{date}'+'lev_tests_generic_ignore_scores'
+    clfGlobals.userInput = f'experiment_3_date_{date}'
     clfGlobals.resultsPath = 'results/'+str(clfGlobals.get_clf_label())+'/experiment3.csv'
 
     # get all the relevant models
@@ -1332,7 +1363,7 @@ def experiment5():
     print("experiment5 in progress")
     # set global variables for experiment
     date = get_date()
-    clfGlobals.userInput = f'experiment_5_date_{date}'+'lev_tests_generic_ignore_scores'
+    clfGlobals.userInput = f'experiment_5_date_{date}'
     clfGlobals.n_mfcc = 20  # verifying correct value for experiment
 
     # get all the relevant models
@@ -1343,6 +1374,7 @@ def experiment5():
         print(f'checking model: {name}')
         clfGlobals.model = model
 
+        # assumption: experiment 2 was already done at this point. use experiment 2 csv.
         clfGlobals.data_file_path = f'csv/'+str(clfGlobals.get_clf_label())+'/data_experiment_2_mfcc_20.csv'
 
         experiment_data_size_with_model_different_mfcc()
@@ -1360,14 +1392,18 @@ def experiments_for_report():
     perform experiments for the final report
     """
     #experiment1()
-    experiment2()
+    #experiment2()
     #experiment3()
-    #experiment5()
+    experiment5()
 
 
 if __name__ == "__main__":
-    # todo delete +'lev_tests_generic_ignore_scores' from every user info in each experiment
-    clfGlobals = global_For_Clf('cry')  # create global variable
-    # experiments()
-    experiments_for_report()
+    # todo add user input- basic clf for mori-use result
+    # clfGlobals = global_For_Clf('cry')  # create global variable
+    #clfGlobals = global_For_Clf('scream')  # create global variable
+    #experiments_for_report()
+    # 'gasp','whisper' ,'sniff'
+    for clf_name in ['gasp']:
+        clfGlobals = global_For_Clf(clf_name)  # create global variable
+        experiments_for_report()
 
