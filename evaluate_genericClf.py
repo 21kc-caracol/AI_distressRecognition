@@ -332,13 +332,14 @@ def create_lower_bound_data_panda(csv_path, label):
     nearMissActualAmount = len(data_csv_negatives_nearMiss)
     NearMissAmountToTake = nearMissActualAmount if nearMissActualAmount < nearMissMaxAmount else nearMissMaxAmount
     clfGlobals.nearMiss_samples = NearMissAmountToTake
-    #  print(f"take {NearMissAmountToTake} near misses")
+    print(f"take {NearMissAmountToTake} near misses")
     # take near misses for this classifier
     data_csv_negatives_NearMiss = data_csv_negatives_nearMiss.sample(n=NearMissAmountToTake)
 
     # take random negatives that aren't near miss
     negatives_amount_left_to_take = lower_amount - NearMissAmountToTake
-    assert (negatives_amount_left_to_take > 0)
+    #lev- bug fix: assert should be valid if left expression also "equals 0"
+    assert (negatives_amount_left_to_take >= 0)
     rest_of_negatives = data_csv.loc[
         ~data_csv['label'].isin([label, clfGlobals.nearMissLabel])]  # take all valid rows
 
@@ -464,7 +465,10 @@ def get_stratified_results(k, X_for_k_fold, y_for_k_fold, IntPositive, clfGlobal
                                     epochs=20,
                                     batch_size=128)
 
-                # save for this loop only the trained model
+                # lev: to save for this loop only the trained model- uncomment next 2 lines -talk to lev b4 uncommenting
+                # save_model_and_weights(model)
+                # exit()
+
                 clfGlobals.model = model
                 clfGlobals.isTrained = True
 
@@ -1259,6 +1263,7 @@ def experiment2():
     models_to_check = get_models_to_check()
 
     #  logically the loops should be switched, but it's better for mfcc loop to be the outer one for faster run-time
+    # 1, 5, 10, 12, 15, 20, 25, 30, 35, 40
     for size in tqdm([1, 5, 10, 12, 15, 20, 25, 30, 35, 40]):
         clfGlobals.n_mfcc = size
 
@@ -1266,7 +1271,8 @@ def experiment2():
             name = type(model).__name__
             print(f'checking model: {name}')
             clfGlobals.model = model
-            clfGlobals.isTrained = False
+
+            clfGlobals.isTrained = False  # False will make the algorithm build and train sequential_<MFCC_amount>
 
             mfcc_amount = size
             clfGlobals.data_file_path = f'csv/'+str(clfGlobals.get_clf_label())+f'/data_experiment_2_mfcc_{mfcc_amount}.csv'
@@ -1344,7 +1350,9 @@ def experiment3():
     models_to_check = get_models_to_check()
     # 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
     # cry- changing amounts to prevent less than 2 near misses
-    nearMiss_ratios = [1, 2, 10, 20, 40, 60]
+    # TODO because we dont have a lot of positives- its hard to get good results- first place to enhance later
+    # TODO  when we will have more Positive samples
+    nearMiss_ratios = [1, 2, 4, 6, 8]
     for ratio in tqdm(nearMiss_ratios):
         clfGlobals.nearMissRatio = ratio
 
@@ -1392,9 +1400,9 @@ def experiments_for_report():
     perform experiments for the final report
     """
     #experiment1()
-    #experiment2()
+    experiment2()
     #experiment3()
-    experiment5()
+    #experiment5()
 
 
 if __name__ == "__main__":
@@ -1403,7 +1411,9 @@ if __name__ == "__main__":
     #clfGlobals = global_For_Clf('scream')  # create global variable
     #experiments_for_report()
     # 'gasp','whisper' ,'sniff'
-    for clf_name in ['gasp']:
+
+    for clf_name in ['sniff']:
+        print(f'checking {clf_name} classification')
         clfGlobals = global_For_Clf(clf_name)  # create global variable
         experiments_for_report()
 
