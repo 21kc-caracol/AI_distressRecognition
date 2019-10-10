@@ -30,7 +30,10 @@ from shutil import copyfile
 import shutil
 
 import datetime
-
+#
+#the libary for the window dialog to select file
+import tkinter as tk
+from tkinter import filedialog
 #
 #
 #
@@ -466,10 +469,13 @@ def predictor_results_to_csv(wav_name, wav_duration):
 if __name__ == "__main__":
     clfGlobals = global_For_Clf("test")  # create global variable
     create_predictor_csv()
-    wav_name = input()
+    root = tk.Tk()
+    root.withdraw()
+    file_path = filedialog.askopenfilename()
+    # wav_name = input()
     # copy the file to a new location before the process begins
-    shutil.copy2(wav_name, "source_files")
-    chunk_to_process = split_file_to_short_wav(wav_name)
+    shutil.copy2(file_path, "source_files")
+    chunk_to_process = split_file_to_short_wav(file_path)
     write_data_aux(chunk_to_process)
     count_positives=predictor_to_all_file_chunks(chunk_to_process)
     print("The file is found" + str(" positive " if count_positives > 0 else " negative ")+"for a distress")
