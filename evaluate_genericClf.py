@@ -38,7 +38,7 @@ import pickle as pkl
 import json
 from keras.models import model_from_json
 
-from models import get_optimised_model
+# from models import get_optimised_model
 from models import get_optimised_model_final
 
 import datetime
@@ -121,7 +121,6 @@ def extract_feature_to_csv(wav_path, label, data_file_path, min_wav_duration, fc
     # extract features for a wav file
     wav_name = wav_path.name  # 110142__ryding__scary-scream-4.wav
     wav_name = wav_name.replace(" ", "_")  # lev bug fix to align csv columns
-    #  print(wav_name)
 
     """
     # lev upgrading error tracking- know which file caused the error
@@ -279,6 +278,7 @@ def create_csv():
             count = 0  # for progress tracking
             print('covered WAV files: ')
             for wav_path in sorted(wave_file_paths):
+                wav_path = Path(wav_path)
                 count += 1
                 if (count % 50) == 0:
                     fp = sys.stdout
